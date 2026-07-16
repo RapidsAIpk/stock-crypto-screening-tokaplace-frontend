@@ -19,9 +19,10 @@ export function ConnectionStatus({ apiBase }: Props) {
   }, [apiBase]);
 
   useEffect(() => {
+    // Single check on load only — no recurring interval. With the backend
+    // scaled to zero on Railway, a repeating ping from every open tab would
+    // wake it up indefinitely and defeat scale-to-zero entirely.
     check();
-    const interval = setInterval(check, 30000);
-    return () => clearInterval(interval);
   }, [check]);
 
   if (connected === null) {
