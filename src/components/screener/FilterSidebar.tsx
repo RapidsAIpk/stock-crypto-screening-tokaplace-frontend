@@ -11,6 +11,9 @@ import { ConfluenceFilter } from "./filters/ConfluenceFilter";
 import { PriceRangeFilter } from "./filters/PriceRangeFilter";
 import { DeadAssetsFilter } from "./filters/DeadAssetsFilter";
 import type { useScreener } from "@/hooks/useScreener";
+import { appEnv } from "@/config/env";
+import { copyTextToClipboard } from "@/lib/copyText";
+import { CopyAllStocksDetailsButton } from "./dev/CopyAllStocksDetailsButton";
 import {
   Sidebar,
   SidebarContent,
@@ -18,9 +21,39 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
 } from "@/components/ui/sidebar";
-import { SlidersHorizontal, Clock3, Layers } from "lucide-react";
+import { Check, ClipboardCopy, Clock3, Layers, SlidersHorizontal } from "lucide-react";
+import { useCallback, useState } from "react";
 
 type ScreenerState = ReturnType<typeof useScreener>;
+
+function CopyFilterConfigButton({ state }: { state: ScreenerState }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    const payload = state.buildRequest();
+    const json = JSON.stringify(payload, null, 2);
+
+    try {
+      await copyTextToClipboard(json);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }, [state]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-3 py-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15"
+      title="Copy the full screener request JSON (same payload sent to the API)"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
+      {copied ? "Copied to clipboard" : "Copy filter config (JSON)"}
+    </button>
+  );
+}
 
 export function FilterSidebar({
   state,
@@ -134,6 +167,24 @@ export function FilterSidebar({
                   />
                 </SidebarGroupContent>
               </SidebarGroup>
+
+              {appEnv.showTechnicalDetails ? (
+                <SidebarGroup className="rounded-[24px] border border-sidebar-border/70 bg-sidebar-accent/30 p-4 shadow-[inset_0_1px_0_hsl(0_0%_100%_/_0.02)]">
+                  <SidebarGroupLabel className="px-0 text-[11px] uppercase tracking-[0.22em] text-sidebar-foreground/55">
+                    Developer
+                  </SidebarGroupLabel>
+                  <SidebarGroupContent className="space-y-2 pt-2">
+                    <p className="text-[10px] leading-4 text-muted-foreground">
+                      Copies the full API request JSON for every selected filter, indicator, and timeframe setting.
+                    </p>
+                    <CopyFilterConfigButton state={state} />
+                    <CopyAllStocksDetailsButton
+                      resultCount={state.results.length}
+                      onExportAllDetails={state.exportAllResultsDetails}
+                    />
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              ) : null}
             </div>
           </div>
         </div>

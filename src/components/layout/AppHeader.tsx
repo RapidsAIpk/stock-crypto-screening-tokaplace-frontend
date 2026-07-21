@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { Activity, Settings, LogOut, Star } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { AppClock } from "@/components/layout/AppClock";
 
 export function AppHeader() {
   const { pathname } = useLocation();
@@ -19,6 +20,8 @@ export function AppHeader() {
             <span className="font-semibold tracking-tight text-foreground">Screener</span>
           </div>
         </div>
+        <div className="flex items-center gap-3">
+        <AppClock />
         <nav className="flex items-center gap-1 rounded-full border border-border/70 bg-card/50 p-1">
           <Link
             to="/"
@@ -55,6 +58,7 @@ export function AppHeader() {
             </button>
           )}
         </nav>
+        </div>
       </div>
       </div>
     </header>

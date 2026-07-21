@@ -210,6 +210,7 @@ export interface IndicatorDetail {
   passed: boolean;
   sticker?: string | null;
   config: Record<string, unknown>;
+  evidence?: Record<string, unknown> | null;
 }
 
 export interface FilterDetail {
@@ -249,6 +250,25 @@ export interface ScreenerDetailRequest {
 
 export interface ScreenerDetailResponse {
   detail: ScreenerResultDetail | null;
+}
+
+export interface ScreenerResultExportEntry {
+  summary: ScreenerResult;
+  detail: ScreenerResultDetail | null;
+  error: string | null;
+}
+
+export interface ScreenerResultsBulkExport {
+  exported_at: string;
+  scan_context: {
+    stage: ScanStage;
+    timeframe: string;
+    request: ScreenerRequest;
+  };
+  result_count: number;
+  loaded_count: number;
+  failed_count: number;
+  results: ScreenerResultExportEntry[];
 }
 
 export interface CryptoExchangeOption {
@@ -907,8 +927,18 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
   {
     name: "linreg_candles",
     fields: [
-      { key: "lr_length", label: "Line Length", type: "number" },
-      { key: "signal_smoothing", label: "Signal Smoothing", type: "number" },
+      { key: "lr_length", label: "Line Length (TV: 11)", type: "number" },
+      { key: "signal_smoothing", label: "Signal Smoothing (TV: 11)", type: "number" },
+      {
+        key: "sma_signal",
+        label: "Simple MA (Signal Line)",
+        type: "boolean",
+      },
+      {
+        key: "lin_reg",
+        label: "Lin Reg Candles",
+        type: "boolean",
+      },
       {
         key: "price_position",
         label: "Position",
@@ -919,7 +949,7 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         key: "close_location",
         label: "Close Location",
         type: "select",
-        options: ["close_above", "close_below", "close_on"],
+        options: ["any", "close_above", "close_below", "close_on", "bullish", "bearish"],
       },
       { key: "tolerance_pct", label: "Tolerance %", type: "number" },
       { key: "window", label: "How Many Candles", type: "number" },
@@ -1125,8 +1155,11 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
   },
   linreg_candles: {
     lr_length: 11,
-    signal_smoothing: 7,
+    signal_smoothing: 11,
+    sma_signal: true,
+    lin_reg: true,
     price_position: "above",
+    close_location: "any",
     tolerance_pct: 0,
     window: 1,
     confirmation: false,
