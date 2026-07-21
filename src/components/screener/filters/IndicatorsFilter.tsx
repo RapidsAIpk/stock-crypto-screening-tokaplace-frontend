@@ -322,8 +322,22 @@ export function IndicatorsFilter({
                         {field.type === "number" && (
                           <input
                             type="number"
+                            min={ind.name === "adx" && field.key === "min_history" ? 200 : undefined}
                             value={(ind.config[field.key] as number) ?? ""}
                             onChange={(e) => updateConfig(idx, field.key, e.target.value ? Number(e.target.value) : null)}
+                            onBlur={(e) => {
+                              // Clamp on blur, not on every keystroke - clamping live would
+                              // make it impossible to type e.g. "250" digit by digit (it'd
+                              // snap to 200 after the first "2"). 200 is a hard floor here,
+                              // not user-lowerable - anything below it reproduces an
+                              // already-fixed TradingView accuracy mismatch.
+                              if (ind.name === "adx" && field.key === "min_history") {
+                                const value = e.target.value ? Number(e.target.value) : null;
+                                if (value !== null && value < 200) {
+                                  updateConfig(idx, field.key, 200);
+                                }
+                              }
+                            }}
                             className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                           />
                         )}
