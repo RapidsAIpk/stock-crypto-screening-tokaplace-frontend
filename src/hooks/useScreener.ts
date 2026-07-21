@@ -17,7 +17,9 @@ import type {
   ScreenerDetailResponse,
   ScreenerRequest,
   ScreenerResult,
-  ScreenerResultDetail
+  ScreenerResultDetail,
+  ScreenerResultsBulkExport,
+  ScreenerResultExportEntry,
 } from "@/types/screener";
 import { DEFAULT_DEAD_ASSETS_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
 import { normalizeConfluenceConfig, normalizeIndicatorConfig } from "@/types/screener";
@@ -843,6 +845,60 @@ export function useScreener() {
     return data.detail;
   }, [buildRequest, callAPI, lastResultContext]);
 
+  const DETAIL_EXPORT_CONCURRENCY = 4;
+
+  const exportAllResultsDetails = useCallback(async (
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<ScreenerResultsBulkExport> => {
+    if (!results.length) {
+      throw new Error("No scan results to export. Run a scan first.");
+    }
+
+    const context = lastResultContext ?? {
+      request: buildRequest(),
+      stage: "single" as ScanStage,
+      timeframe: singleTimeframe,
+    };
+
+    const exported: ScreenerResultExportEntry[] = [];
+    let failedCount = 0;
+
+    for (let index = 0; index < results.length; index += DETAIL_EXPORT_CONCURRENCY) {
+      const chunk = results.slice(index, index + DETAIL_EXPORT_CONCURRENCY);
+      const chunkEntries = await Promise.all(
+        chunk.map(async (result): Promise<ScreenerResultExportEntry> => {
+          try {
+            const detail = await fetchResultDetail(result);
+            return { summary: result, detail, error: null };
+          } catch (error) {
+            failedCount += 1;
+            return {
+              summary: result,
+              detail: null,
+              error: error instanceof Error ? error.message : "Asset detail unavailable.",
+            };
+          }
+        }),
+      );
+
+      exported.push(...chunkEntries);
+      onProgress?.(exported.length, results.length);
+    }
+
+    return {
+      exported_at: new Date().toISOString(),
+      scan_context: {
+        stage: context.stage,
+        timeframe: context.timeframe,
+        request: context.request,
+      },
+      result_count: results.length,
+      loaded_count: exported.filter((entry) => entry.detail !== null).length,
+      failed_count: failedCount,
+      results: exported,
+    };
+  }, [buildRequest, fetchResultDetail, lastResultContext, results, singleTimeframe]);
+
 
   // -------------------------------------------------------
   // RETURN
@@ -981,9 +1037,11 @@ export function useScreener() {
     runEntry,
     runGateEntry,
     fetchResultDetail,
+    exportAllResultsDetails,
 
     getSnapshot,
-    loadSnapshot
+    loadSnapshot,
+    buildRequest,
 
   };
 }

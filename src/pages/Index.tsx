@@ -87,6 +87,7 @@ const Index = () => {
                 results={state.results}
                 loading={state.loading}
                 onRequestDetail={state.fetchResultDetail}
+                onExportAllDetails={appEnv.showTechnicalDetails ? state.exportAllResultsDetails : undefined}
                 activeSignalNames={[
                   ...state.indicators.map((indicator) => indicator.name),
                   ...(state.channelRespect ? ["channel_respect"] : []),

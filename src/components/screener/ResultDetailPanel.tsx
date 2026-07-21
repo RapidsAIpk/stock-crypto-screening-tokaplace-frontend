@@ -1,6 +1,9 @@
 import { X } from "lucide-react";
 import type { FilterDetail, IndicatorDetail, ScreenerResult, ScreenerResultDetail } from "@/types/screener";
 import { getIndicatorColor } from "./indicatorColors";
+import { appEnv } from "@/config/env";
+import { useUserSettings } from "@/hooks/useUserSettings";
+import { formatDateValue, formatUnixSeconds } from "@/lib/dates";
 
 interface Props {
   result: ScreenerResult;
@@ -10,7 +13,11 @@ interface Props {
   onClose: () => void;
 }
 
-function formatPrice(value: number): string {
+function formatPrice(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "N/A";
+  }
+
   const abs = Math.abs(value);
 
   if (abs === 0) {
@@ -35,34 +42,34 @@ function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString();
 }
 
-function formatUnixSeconds(value: number | null | undefined): string {
-  if (!value && value !== 0) {
-    return "N/A";
-  }
-
-  const date = new Date(value * 1000);
-  if (Number.isNaN(date.getTime())) {
-    return "N/A";
-  }
-
-  return date.toLocaleString();
+function humanizeToken(value: unknown): string {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function formatDateValue(value: unknown): string {
-  if (!value) {
-    return "N/A";
-  }
+function timeframeLabel(value: string | null | undefined): string {
+  const token = String(value || "").toLowerCase();
+  const map: Record<string, string> = {
+    "1m": "1 minute",
+    "5m": "5 minutes",
+    "15m": "15 minutes",
+    "30m": "30 minutes",
+    "1h": "1 hour",
+    "4h": "4 hours",
+    "1day": "1 day",
+    "1d": "1 day",
+    "1w": "1 week",
+    "1mo": "1 month",
+  };
+  return map[token] || humanizeToken(token) || "Selected chart period";
+}
 
-  if (typeof value === "number") {
-    return formatUnixSeconds(value);
-  }
-
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
-
-  return date.toLocaleString();
+function stageLabel(value: string | null | undefined): string {
+  const token = String(value || "single").toLowerCase();
+  if (token === "gate") return "Gate scan";
+  if (token === "entry") return "Entry scan";
+  return "Single scan";
 }
 
 function jsonString(value: unknown): string {
@@ -95,11 +102,12 @@ function JsonBlock({ title, value, defaultOpen = false }: { title: string; value
   );
 }
 
-function MetaCard({ label, value }: { label: string; value: string }) {
+function MetaCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="space-y-1 rounded-2xl border border-border/60 bg-background/35 p-4">
       <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
       <div className="text-sm text-foreground">{value}</div>
+      {hint ? <div className="text-[11px] leading-4 text-muted-foreground">{hint}</div> : null}
     </div>
   );
 }
@@ -122,113 +130,291 @@ function DetailStatusBadge({ passed }: { passed: boolean }) {
           : "border-rose-400/30 bg-rose-400/10 text-rose-200"
       }`}
     >
-      {passed ? "Pass" : "Fail"}
+      {passed ? "Matched" : "Did not match"}
     </span>
   );
 }
 
-function IndicatorCard({ item }: { item: IndicatorDetail }) {
+function OhlcRow({
+  title,
+  open,
+  high,
+  low,
+  close,
+  accent,
+}: {
+  title: string;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  accent?: string;
+}) {
+  return (
+    <div className={`rounded-2xl border border-border/50 bg-background/40 p-3 ${accent || ""}`}>
+      <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">{title}</div>
+      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+        <div><span className="text-muted-foreground">Open</span><div className="font-mono text-foreground">{formatPrice(open)}</div></div>
+        <div><span className="text-muted-foreground">High</span><div className="font-mono text-foreground">{formatPrice(high)}</div></div>
+        <div><span className="text-muted-foreground">Low</span><div className="font-mono text-foreground">{formatPrice(low)}</div></div>
+        <div><span className="text-muted-foreground">Close</span><div className="font-mono text-foreground">{formatPrice(close)}</div></div>
+      </div>
+    </div>
+  );
+}
+
+function LinRegEvidenceCard({ evidence }: { evidence: Record<string, unknown> }) {
+  const evaluationBar = (evidence.evaluation_bar || {}) as Record<string, unknown>;
+  const virtual = (evaluationBar.virtual_linreg || {}) as Record<string, number | null>;
+  const raw = (evaluationBar.raw || {}) as Record<string, number | null>;
+  const settings = (evidence.settings || {}) as Record<string, unknown>;
+  const ruleChecks = (evidence.rule_checks || {}) as Record<string, Record<string, unknown>>;
+  const forming = evidence.forming_bar_skipped as Record<string, unknown> | null | undefined;
+  const passed = Boolean(evidence.passed);
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-foreground">Linear Regression Candles</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            {String(evidence.plain_language || evidence.summary || "LinReg check details")}
+          </div>
+        </div>
+        <DetailStatusBadge passed={passed} />
+      </div>
+
+      {forming ? (
+        <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          Market bar still forming — filter used the last completed candle, not the live incomplete bar.
+          {forming.time != null ? ` Skipped bar: ${formatUnixSeconds(Number(forming.time))}.` : ""}
+        </div>
+      ) : null}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <MetaCard
+          label="Checked candle"
+          value={formatUnixSeconds(typeof evaluationBar.time === "number" ? evaluationBar.time : null)}
+          hint="This is the bar to open on TradingView"
+        />
+        <MetaCard
+          label="White signal line"
+          value={formatPrice(typeof evaluationBar.signal_line === "number" ? evaluationBar.signal_line : null)}
+          hint="Compare against the white line on Humble LinReg Candles"
+        />
+      </div>
+
+      <OhlcRow
+        title="LinReg candle (what the filter used)"
+        open={virtual.open}
+        high={virtual.high}
+        low={virtual.low}
+        close={virtual.close}
+        accent="border-emerald-400/20"
+      />
+
+      <OhlcRow
+        title="Normal price candle (for reference only)"
+        open={raw.open}
+        high={raw.high}
+        low={raw.low}
+        close={raw.close}
+      />
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-border/50 bg-background/35 p-3 text-xs">
+          <div className="text-muted-foreground">Position rule</div>
+          <div className="mt-1 font-medium text-foreground">
+            {String(ruleChecks.price_position?.label || settings.price_position || "—")}
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            {ruleChecks.price_position?.passed ? "Matched" : "Not matched"}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border/50 bg-background/35 p-3 text-xs">
+          <div className="text-muted-foreground">Close rule</div>
+          <div className="mt-1 font-medium text-foreground">
+            {String(ruleChecks.close_location?.label || settings.close_location || "Any")}
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            {ruleChecks.close_location?.passed === false ? "Not matched" : "Matched / not required"}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border/40 bg-background/25 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+        Settings used: length {String(settings.lr_length ?? 11)}, smoothing {String(settings.signal_smoothing ?? 11)},{" "}
+        {settings.sma_signal === false ? "EMA signal" : "SMA signal"},{" "}
+        {settings.lin_reg === false ? "raw candles" : "LinReg candles"}.
+        {" "}
+        {String(evidence.data_note || "")}
+      </div>
+    </div>
+  );
+}
+
+function FriendlyIndicatorCard({ item, showTechnical }: { item: IndicatorDetail; showTechnical: boolean }) {
+  const evidence = item.evidence || null;
+  const isLinReg = item.name === "linreg_candles" && evidence;
+
+  if (isLinReg) {
+    return (
+      <div className="space-y-3">
+        <LinRegEvidenceCard evidence={evidence} />
+        {showTechnical ? <JsonBlock title="Raw indicator config" value={item.config} /> : null}
+        {showTechnical ? <JsonBlock title="Raw evidence JSON" value={evidence} /> : null}
+      </div>
+    );
+  }
+
+  const plain =
+    evidence && typeof evidence.plain_language === "string"
+      ? evidence.plain_language
+      : evidence && typeof evidence.summary === "string"
+        ? evidence.summary
+        : item.sticker
+          ? "This filter matched for the selected settings."
+          : item.passed
+            ? "This filter passed."
+            : "This filter did not pass.";
+
   return (
     <div className="rounded-2xl border border-border/60 bg-background/30 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-sm font-semibold capitalize text-foreground">{item.name.replace(/_/g, " ")}</div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            {item.timeframe_scope || "selected scope"}
+          <div className="text-sm font-semibold capitalize text-foreground">{humanizeToken(item.name)}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {item.timeframe_scope === "primary"
+              ? "Used on the gate timeframe"
+              : item.timeframe_scope === "secondary"
+                ? "Used on the entry timeframe"
+                : "Used on the selected timeframe"}
           </div>
         </div>
         <DetailStatusBadge passed={item.passed} />
       </div>
 
-      {item.sticker && (
+      <p className="mt-3 text-xs leading-5 text-muted-foreground">{plain}</p>
+
+      {item.sticker ? (
         <div className="mt-3">
           <SignalBadge label={item.sticker} />
         </div>
-      )}
+      ) : null}
 
-      <JsonBlock title="Indicator Config" value={item.config} />
+      {showTechnical ? <JsonBlock title="Indicator Config" value={item.config} /> : null}
+      {showTechnical && evidence ? <JsonBlock title="Evidence" value={evidence} /> : null}
     </div>
   );
 }
 
-function FilterCard({ item }: { item: FilterDetail }) {
+function FriendlyFilterCard({ item, showTechnical }: { item: FilterDetail; showTechnical: boolean }) {
   return (
     <div className="rounded-2xl border border-border/60 bg-background/30 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-sm font-semibold capitalize text-foreground">{item.name.replace(/_/g, " ")}</div>
-          <div className="text-xs text-muted-foreground">{item.summary || "No summary available."}</div>
+          <div className="text-sm font-semibold capitalize text-foreground">{humanizeToken(item.name)}</div>
+          <div className="text-xs text-muted-foreground">{item.summary || "Extra screener rule."}</div>
         </div>
         <DetailStatusBadge passed={item.passed} />
       </div>
 
-      {item.sticker && (
+      {item.sticker ? (
         <div className="mt-3">
           <SignalBadge label={item.sticker} />
         </div>
-      )}
+      ) : null}
 
-      <JsonBlock title="Filter Details" value={item.details} />
+      {showTechnical ? <JsonBlock title="Filter Details" value={item.details} /> : null}
     </div>
   );
 }
 
 export function ResultDetailPanel({ result, detail, loading = false, error = "", onClose }: Props) {
+  const showTechnical = appEnv.showTechnicalDetails;
+  const { settings } = useUserSettings();
+  const timeZone = settings.timezone || "UTC";
   const active = detail ?? result;
-  const lastCandle = formatUnixSeconds(active.last_candle_time ?? null);
-  const reportDate = formatDateValue(active.report_date);
-  const stageLabel = (active.scan_stage || "single").toUpperCase();
+  const lastCandle = formatUnixSeconds(active.last_candle_time ?? null, timeZone);
+  const reportDate = formatDateValue(active.report_date, timeZone);
   const marketData = detail?.market_data;
   const indicatorDetails = detail?.indicator_details || [];
   const filterDetails = detail?.filter_details || [];
+  const passedIndicators = indicatorDetails.filter((item) => item.passed);
+  const failedIndicators = indicatorDetails.filter((item) => !item.passed);
 
   return (
     <div className="space-y-5 rounded-[28px] border border-border/70 bg-[linear-gradient(135deg,hsl(var(--card)_/_0.98),hsl(205_34%_12%_/_0.88))] p-5 shadow-[0_24px_80px_hsl(210_45%_3%_/_0.24)]">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-2">
-          <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">Selected Asset</div>
+          <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">Selected stock / coin</div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-semibold font-mono text-foreground">{active.symbol}</h3>
             <span className="rounded-full border border-border/70 bg-background/35 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              {active.asset_type}
+              {active.asset_type === "crypto" ? "Crypto" : "Stock"}
             </span>
             <span className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-primary">
-              {stageLabel}
+              {stageLabel(active.scan_stage)}
             </span>
-            <span className="rounded-full border border-border/70 bg-background/35 px-2.5 py-1 text-[10px] font-mono text-foreground">
-              {active.timeframe}
+            <span className="rounded-full border border-border/70 bg-background/35 px-2.5 py-1 text-[10px] text-foreground">
+              {timeframeLabel(active.timeframe)}
             </span>
           </div>
-          <div className="text-sm text-muted-foreground">{active.name || "Unnamed asset"}</div>
+          <div className="text-sm text-muted-foreground">{active.name || "Name unavailable"}</div>
         </div>
         <button onClick={onClose} className="rounded-full border border-border/70 p-2 text-muted-foreground transition-colors hover:text-foreground">
           <X className="h-4 w-4" />
         </button>
       </div>
 
+      <div className="rounded-2xl border border-border/50 bg-background/25 px-4 py-3 text-xs leading-5 text-muted-foreground">
+        Use this panel to see <span className="text-foreground">why</span> this symbol appeared (or did not).
+        For LinReg Candles, compare the colored LinReg candle and white signal line values below with TradingView —
+        hide normal candles so you do not mix them up.
+      </div>
+
       <div className="grid gap-4 md:grid-cols-4">
-        <MetaCard label="Price" value={formatPrice(active.price)} />
+        <MetaCard label="Latest price" value={formatPrice(active.price)} />
         <MetaCard
-          label="Source"
+          label="Chart period"
+          value={timeframeLabel(active.timeframe)}
+          hint={stageLabel(active.scan_stage)}
+        />
+        <MetaCard
+          label="Market / exchange"
           value={`${active.data_source}${active.exchange ? ` • ${active.exchange}` : ""}`}
         />
         <MetaCard
-          label="Category / Compliance"
-          value={active.category || active.compliance_status || "N/A"}
+          label="Last completed candle"
+          value={lastCandle}
+          hint="Open this date/time on TradingView"
         />
-        <MetaCard label="Last Candle" value={lastCandle} />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <MetaCard label="Candles" value={String(active.candles_count ?? "N/A")} />
-        <MetaCard label="CMC ID / Rank" value={`${active.cmc_id ?? "N/A"} / ${active.rank ?? "N/A"}`} />
-        <MetaCard label="Report Date" value={reportDate} />
-        <MetaCard label="Purification Ratio" value={active.purification_ratio?.toString() || "N/A"} />
-      </div>
+      {showTechnical ? (
+        <div className="grid gap-4 md:grid-cols-4">
+          <MetaCard label="Candles loaded" value={String(active.candles_count ?? "N/A")} />
+          <MetaCard label="CMC ID / Rank" value={`${active.cmc_id ?? "N/A"} / ${active.rank ?? "N/A"}`} />
+          <MetaCard label="Report Date" value={reportDate} />
+          <MetaCard label="Purification Ratio" value={active.purification_ratio?.toString() || "N/A"} />
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          <MetaCard
+            label="Category / compliance"
+            value={active.category || active.compliance_status || "N/A"}
+          />
+          <MetaCard
+            label="Candles used in scan"
+            value={String(active.candles_count ?? "N/A")}
+            hint="How many historical bars were available for this filter"
+          />
+        </div>
+      )}
 
       {active.exchange_availability?.length ? (
         <div className="space-y-2">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Exchange Availability</div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Listed on</div>
           <div className="flex flex-wrap gap-1.5">
             {active.exchange_availability.map((exchange) => (
               <span key={exchange} className="rounded-full border border-border/70 bg-background/30 px-2.5 py-1 text-xs text-foreground">
@@ -240,21 +426,21 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
       ) : null}
 
       <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Matched Signals</div>
+        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Why it matched</div>
         <div className="flex flex-wrap gap-1.5">
           {active.stickers.length > 0 ? (
             active.stickers.map((sticker, index) => (
               <SignalBadge key={`${active.symbol}-${sticker}-${index}`} label={sticker} />
             ))
           ) : (
-            <span className="text-xs text-muted-foreground">No matched signals on the current detail payload.</span>
+            <span className="text-xs text-muted-foreground">No matched filter labels on this result.</span>
           )}
         </div>
       </div>
 
       {loading && (
         <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-primary">
-          Loading backend detail for this asset...
+          Loading a clearer explanation for this asset...
         </div>
       )}
 
@@ -266,21 +452,36 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
 
       {detail && (
         <>
-          <div className="grid gap-4 md:grid-cols-3">
-            <MetaCard label="Candle Provider" value={marketData?.candles_provider || "N/A"} />
-            <MetaCard label="Next Refresh" value={formatUnixSeconds(marketData?.next_refresh_at)} />
-            <MetaCard
-              label="Shares / Float"
-              value={`${formatNumber(marketData?.shares_outstanding)} / ${formatNumber(marketData?.float_shares)}`}
-            />
-          </div>
+          {showTechnical ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              <MetaCard label="Candle Provider" value={marketData?.candles_provider || "N/A"} />
+              <MetaCard label="Next Refresh" value={formatUnixSeconds(marketData?.next_refresh_at)} />
+              <MetaCard
+                label="Shares / Float"
+                value={`${formatNumber(marketData?.shares_outstanding)} / ${formatNumber(marketData?.float_shares)}`}
+              />
+            </div>
+          ) : marketData?.candles_provider ? (
+            <div className="rounded-2xl border border-border/50 bg-background/25 px-4 py-3 text-xs text-muted-foreground">
+              Price data provider: <span className="text-foreground">{marketData.candles_provider}</span>
+              {" "}(usually split/dividend adjusted). Tiny differences vs TradingView can still happen on edge cases.
+            </div>
+          ) : null}
 
           <div className="space-y-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Indicator Diagnostics</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              Filter checks {passedIndicators.length || failedIndicators.length
+                ? `(${passedIndicators.length} matched${failedIndicators.length ? `, ${failedIndicators.length} not matched` : ""})`
+                : ""}
+            </div>
             {indicatorDetails.length > 0 ? (
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3">
                 {indicatorDetails.map((item) => (
-                  <IndicatorCard key={`${item.name}-${item.timeframe_scope}`} item={item} />
+                  <FriendlyIndicatorCard
+                    key={`${item.name}-${item.timeframe_scope}`}
+                    item={item}
+                    showTechnical={showTechnical}
+                  />
                 ))}
               </div>
             ) : (
@@ -290,32 +491,38 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
             )}
           </div>
 
-          <div className="space-y-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Filter Diagnostics</div>
-            {filterDetails.length > 0 ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                {filterDetails.map((item) => (
-                  <FilterCard key={item.name} item={item} />
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-border/60 bg-background/25 px-4 py-3 text-sm text-muted-foreground">
-                No extra filter diagnostics were returned.
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Backend Data</div>
-            <div className="grid gap-3">
-              <JsonBlock title="Request Filters" value={detail.request_filters} defaultOpen />
-              <JsonBlock title="Asset Metadata" value={detail.asset_metadata} />
-              <JsonBlock title="Last Candle" value={marketData?.last_candle} />
-              <JsonBlock title="Recent Candles" value={marketData?.recent_candles} />
-              <JsonBlock title="Channels" value={detail.channels} />
-              <JsonBlock title="Confluence Channels" value={detail.confluence_channels} />
+          {(filterDetails.length > 0 || showTechnical) && (
+            <div className="space-y-3">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Other rules</div>
+              {filterDetails.length > 0 ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {filterDetails.map((item) => (
+                    <FriendlyFilterCard key={item.name} item={item} showTechnical={showTechnical} />
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-border/60 bg-background/25 px-4 py-3 text-sm text-muted-foreground">
+                  No extra rules (price range, dead assets, confluence, etc.) were returned.
+                </div>
+              )}
             </div>
-          </div>
+          )}
+
+          {showTechnical ? (
+            <div className="space-y-3">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                Developer data (VITE_SHOW_TECHNICAL_DETAILS=true)
+              </div>
+              <div className="grid gap-3">
+                <JsonBlock title="Request Filters" value={detail.request_filters} defaultOpen />
+                <JsonBlock title="Asset Metadata" value={detail.asset_metadata} />
+                <JsonBlock title="Last Candle" value={marketData?.last_candle} />
+                <JsonBlock title="Recent Candles" value={marketData?.recent_candles} />
+                <JsonBlock title="Channels" value={detail.channels} />
+                <JsonBlock title="Confluence Channels" value={detail.confluence_channels} />
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>

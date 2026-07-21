@@ -54,6 +54,12 @@ const FIELD_HELP_TEXT: Record<string, string> = {
   interval_step: "Used when Window Type is Interval. Example: 2 reads every second candle.",
   show_last_channel: "Keeps the latest detected pivot channel visible after a break, similar to TradingView.",
   wait_for_break: "Locks the active pivot channel in place until a liquidity-style break confirms.",
+  lr_length: "TradingView default is 11. Matches Humble LinReg Candles “Linear Regression Length”.",
+  signal_smoothing: "TradingView default is 11. Matches “Signal Smoothing” on the white line.",
+  sma_signal: "On = Simple MA of LinReg close (TV default). Off = Exponential MA.",
+  lin_reg: "On = use smoothed LinReg candles (TV default). Off = use normal price candles.",
+  price_position: "Where the LinReg candle sits vs the white signal line.",
+  close_location: "Optional extra check on LinReg close. “Any” skips this check.",
 };
 
 function timeframeLabel(tf: IndicatorTimeframe): string {
@@ -175,6 +181,15 @@ export function IndicatorsFilter({
     if (c.level) parts.push(String(c.level));
     if (c.rule) parts.push(String(c.rule).replace(/_/g, " "));
     if (c.direction) parts.push(String(c.direction).replace(/_/g, " "));
+    if (c.price_position) parts.push(String(c.price_position).replace(/_/g, " "));
+    if (c.close_location && c.close_location !== "any") {
+      parts.push(String(c.close_location).replace(/_/g, " "));
+    }
+    if (ind.name === "linreg_candles") {
+      if (c.signal_smoothing != null) parts.push(`smooth ${c.signal_smoothing}`);
+      if (c.sma_signal === false) parts.push("EMA signal");
+      if (c.lin_reg === false) parts.push("raw candles");
+    }
     if (c.multiplier) parts.push(`x${c.multiplier}`);
     return parts.length > 0 ? parts.join(" · ") : "Using defaults";
   };

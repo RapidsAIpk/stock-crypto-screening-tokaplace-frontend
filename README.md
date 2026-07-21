@@ -27,6 +27,10 @@ Optional:
 - `VITE_API_BASE`
   - If omitted in development, defaults to `http://localhost:8000/screen`
   - In production, it is required
+- `VITE_SHOW_TECHNICAL_DETAILS`
+  - Default `false`
+  - Set to `true` to show raw JSON / provider dumps on the result detail panel (developer view)
+  - Leave `false` for the simpler non-technical explanation view
 
 ## Local Development
 

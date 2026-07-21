@@ -13,18 +13,23 @@ import {
   Star,
 } from "lucide-react";
 import { INDICATOR_CATEGORY_MAP } from "@/types/screener";
-import type { ScreenerResult, ScreenerResultDetail, IndicatorCategory } from "@/types/screener";
+import type { ScreenerResult, ScreenerResultDetail, ScreenerResultsBulkExport, IndicatorCategory } from "@/types/screener";
 import { ResultDetailPanel } from "./ResultDetailPanel";
 import { getIndicatorColor } from "./indicatorColors";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { WatchlistEntry } from "@/hooks/useUserSettings";
+import { appEnv } from "@/config/env";
+import { CopyAllStocksDetailsButton } from "./dev/CopyAllStocksDetailsButton";
 
 interface Props {
   results: ScreenerResult[];
   loading: boolean;
   activeSignalNames?: string[];
   onRequestDetail: (result: ScreenerResult) => Promise<ScreenerResultDetail>;
+  onExportAllDetails?: (
+    onProgress?: (loaded: number, total: number) => void,
+  ) => Promise<ScreenerResultsBulkExport>;
   watchlist?: WatchlistEntry[];
   onAddWatchlistEntry?: (symbol: string, assetType: ScreenerResult["asset_type"]) => void;
   onRemoveWatchlistEntry?: (id: string) => void;
@@ -113,6 +118,7 @@ export function ResultsTable({
   loading,
   activeSignalNames = EMPTY_SIGNAL_NAMES,
   onRequestDetail,
+  onExportAllDetails,
   watchlist: watchlistEntries = EMPTY_WATCHLIST,
   onAddWatchlistEntry,
   onRemoveWatchlistEntry,
@@ -502,6 +508,13 @@ export function ResultsTable({
             <span className="rounded-full border border-border/70 bg-secondary/60 px-3 py-1.5 text-xs font-mono text-muted-foreground">
               {filtered.length} results
             </span>
+            {appEnv.showTechnicalDetails && onExportAllDetails ? (
+              <CopyAllStocksDetailsButton
+                variant="toolbar"
+                resultCount={results.length}
+                onExportAllDetails={onExportAllDetails}
+              />
+            ) : null}
             <button
               onClick={downloadExcel}
               className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15"

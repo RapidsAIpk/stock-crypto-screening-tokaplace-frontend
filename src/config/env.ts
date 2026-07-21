@@ -17,12 +17,22 @@ function readOptional(name: keyof ImportMetaEnv): string | undefined {
   return value ? value : undefined;
 }
 
+function readBool(name: keyof ImportMetaEnv, defaultValue = false): boolean {
+  const value = import.meta.env[name]?.trim().toLowerCase();
+  if (!value) {
+    return defaultValue;
+  }
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 const rawApiBase = readOptional("VITE_API_BASE");
 
 export const appEnv = {
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
   apiBase: sanitizeBaseUrl(rawApiBase ?? (import.meta.env.DEV ? DEFAULT_DEV_API_BASE : readRequired("VITE_API_BASE"))),
+  /** When false, hides raw JSON / provider dumps on the result detail panel. */
+  showTechnicalDetails: readBool("VITE_SHOW_TECHNICAL_DETAILS", false),
   firebase: {
     apiKey: readRequired("VITE_FIREBASE_API_KEY"),
     authDomain: readRequired("VITE_FIREBASE_AUTH_DOMAIN"),
