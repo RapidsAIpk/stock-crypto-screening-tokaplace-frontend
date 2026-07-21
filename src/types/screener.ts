@@ -743,6 +743,11 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "length", label: "Length", type: "number" },
       { key: "threshold", label: "Threshold (ADX Trend Line)", type: "number" },
       {
+        key: "min_history",
+        label: "History Depth (candles) — minimum 200 for TradingView accuracy; raise for extra margin",
+        type: "number",
+      },
+      {
         key: "mode",
         label: "Filter Type",
         type: "select",
@@ -1095,6 +1100,7 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     down_level: -4,
     falling_level: -10,
     bottom_level: -19,
+    min_history: 200,
   },
   vlr: {
     source: "close",
