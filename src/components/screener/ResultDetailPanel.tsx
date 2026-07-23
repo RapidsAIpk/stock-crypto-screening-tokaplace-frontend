@@ -4,6 +4,7 @@ import { getIndicatorColor } from "./indicatorColors";
 import { appEnv } from "@/config/env";
 import { useUserSettings } from "@/hooks/useUserSettings";
 import { formatDateValue, formatUnixSeconds } from "@/lib/dates";
+import { ResultDetailChart } from "./ResultDetailChart";
 
 interface Props {
   result: ScreenerResult;
@@ -513,6 +514,15 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
               <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                 Developer data (VITE_SHOW_TECHNICAL_DETAILS=true)
               </div>
+              <ResultDetailChart
+                key={`${active.symbol}-${active.timeframe}`}
+                candles={marketData?.recent_candles || []}
+                indicatorDetails={indicatorDetails}
+                symbol={active.symbol}
+                timeframe={active.timeframe}
+                timeZone={timeZone}
+                provider={marketData?.candles_provider}
+              />
               <div className="grid gap-3">
                 <JsonBlock title="Request Filters" value={detail.request_filters} defaultOpen />
                 <JsonBlock title="Asset Metadata" value={detail.asset_metadata} />

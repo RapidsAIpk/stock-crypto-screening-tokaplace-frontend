@@ -14,6 +14,7 @@ import type { useScreener } from "@/hooks/useScreener";
 import { appEnv } from "@/config/env";
 import { copyTextToClipboard } from "@/lib/copyText";
 import { CopyAllStocksDetailsButton } from "./dev/CopyAllStocksDetailsButton";
+import { CopyStockNamesButton } from "./dev/CopyStockNamesButton";
 import {
   Sidebar,
   SidebarContent,
@@ -178,6 +179,9 @@ export function FilterSidebar({
                       Copies the full API request JSON for every selected filter, indicator, and timeframe setting.
                     </p>
                     <CopyFilterConfigButton state={state} />
+                    <CopyStockNamesButton
+                      symbols={state.results.map((result) => result.symbol)}
+                    />
                     <CopyAllStocksDetailsButton
                       resultCount={state.results.length}
                       onExportAllDetails={state.exportAllResultsDetails}
