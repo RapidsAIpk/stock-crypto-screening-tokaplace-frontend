@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import type { WatchlistEntry } from "@/hooks/useUserSettings";
 import { appEnv } from "@/config/env";
 import { CopyAllStocksDetailsButton } from "./dev/CopyAllStocksDetailsButton";
+import { CopyStockNamesButton } from "./dev/CopyStockNamesButton";
 
 interface Props {
   results: ScreenerResult[];
@@ -508,12 +509,20 @@ export function ResultsTable({
             <span className="rounded-full border border-border/70 bg-secondary/60 px-3 py-1.5 text-xs font-mono text-muted-foreground">
               {filtered.length} results
             </span>
-            {appEnv.showTechnicalDetails && onExportAllDetails ? (
-              <CopyAllStocksDetailsButton
-                variant="toolbar"
-                resultCount={results.length}
-                onExportAllDetails={onExportAllDetails}
-              />
+            {appEnv.showTechnicalDetails ? (
+              <>
+                <CopyStockNamesButton
+                  variant="toolbar"
+                  symbols={results.map((result) => result.symbol)}
+                />
+                {onExportAllDetails ? (
+                  <CopyAllStocksDetailsButton
+                    variant="toolbar"
+                    resultCount={results.length}
+                    onExportAllDetails={onExportAllDetails}
+                  />
+                ) : null}
+              </>
             ) : null}
             <button
               onClick={downloadExcel}

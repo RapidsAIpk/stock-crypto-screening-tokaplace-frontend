@@ -221,13 +221,25 @@ export interface FilterDetail {
   details: Record<string, unknown>;
 }
 
+export interface MarketCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+  vwap?: number | null;
+  transactions?: number | null;
+  is_closed?: boolean;
+}
+
 export interface MarketDataDetail {
   candles_provider?: string | null;
   next_refresh_at?: number | null;
   shares_outstanding?: number | null;
   float_shares?: number | null;
-  last_candle?: Record<string, unknown> | null;
-  recent_candles: Record<string, unknown>[];
+  last_candle?: MarketCandle | Record<string, unknown> | null;
+  recent_candles: Array<MarketCandle | Record<string, unknown>>;
 }
 
 export interface ScreenerResultDetail extends ScreenerResult {
