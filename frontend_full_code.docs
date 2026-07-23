@@ -1,0 +1,1783 @@
+# Frontend Full Code Documentation
+
+Project: `Frontend_Crypto_project`
+Generated: 2026-07-21
+
+## 1. Executive Summary
+
+This project is a React + Vite + TypeScript frontend for a market screener. It supports stock and crypto screening, configurable indicator filters, single or gate-entry scan modes, result tables, result details, presets, watchlists, user settings, backend health checks, runtime API controls, and developer JSON export tools.
+
+The application is structured as a single-page app with protected routes. It uses:
+
+- React 18 for UI.
+- Vite for development and production builds.
+- TypeScript for typing.
+- Tailwind CSS for styling.
+- shadcn/Radix UI style components under `src/components/ui`.
+- React Router for routing.
+- TanStack Query provider for shared query infrastructure.
+- Firebase Auth and Firestore integration, although auth is currently mocked in `AuthContext.tsx`.
+- Vitest and Testing Library for unit/component tests.
+
+Main user workflow:
+
+1. User opens `/auth`.
+2. Mock login creates a temporary authenticated user.
+3. Protected app shell loads the main dashboard.
+4. User configures filters in the left sidebar.
+5. User runs a single scan or gate-entry scan.
+6. Frontend sends JSON payloads to backend screen endpoints.
+7. Results appear in a searchable/sortable/paginated table.
+8. User can open detailed result explanations, export data, save presets, or star symbols into a watchlist.
+
+Important current caveat:
+
+- `src/contexts/AuthContext.tsx` currently uses a temporary mock auth implementation. The original Firebase-backed implementation is preserved in comments. Because Firestore still requires a real authenticated Firebase token, settings, presets, and watchlist persistence may fail while mock auth is active.
+
+## 2. Tech Stack
+
+Runtime and framework:
+
+- `react`, `react-dom`: application UI.
+- `vite`: development server and build tool.
+- `typescript`: static typing.
+- `react-router-dom`: browser routing.
+- `@tanstack/react-query`: app-level query client.
+
+UI and styling:
+
+- `tailwindcss`, `tailwind-merge`, `clsx`.
+- `@radix-ui/*`: low-level accessible UI primitives.
+- `lucide-react`: icons.
+- `class-variance-authority`: component variants.
+- `sonner` and local toast components for notifications.
+- `recharts`, `react-day-picker`, `embla-carousel-react`, `vaul`, `cmdk`, and other UI dependencies are available through the component library.
+
+Backend/data:
+
+- `firebase`: app initialization, auth, Firestore.
+- Browser `fetch`: used directly for screener and ops endpoints.
+
+Testing:
+
+- `vitest`.
+- `@testing-library/react`.
+- `@testing-library/jest-dom`.
+- `jsdom`.
+
+## 3. Project Scripts
+
+Defined in `package.json`:
+
+- `npm run dev`: starts Vite dev server.
+- `npm run typecheck`: runs `tsc --noEmit -p tsconfig.app.json`.
+- `npm run start`: serves `dist` using `serve -s dist -l $PORT`.
+- `npm run build`: typechecks, then runs production `vite build`.
+- `npm run build:dev`: Vite build in development mode.
+- `npm run lint`: runs ESLint.
+- `npm run preview`: serves the Vite build preview.
+- `npm run test`: runs Vitest once.
+- `npm run test:watch`: starts Vitest watch mode.
+- `npm run check`: runs typecheck, lint, and tests.
+
+Node configuration:
+
+- `package.json` requests Node `20.x`.
+- npm version is expected to be `>=9`.
+- `.nvmrc` contains `20`.
+
+## 4. Environment Variables
+
+The frontend reads environment through `src/config/env.ts`.
+
+Required Firebase variables:
+
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+
+Optional variables:
+
+- `VITE_FIREBASE_MEASUREMENT_ID`
+- `VITE_API_BASE`
+- `VITE_SHOW_TECHNICAL_DETAILS`
+
+API base behavior:
+
+- In development, if `VITE_API_BASE` is missing, the default is `http://localhost:8000/screen`.
+- In production, `VITE_API_BASE` is required.
+- Trailing slashes are stripped.
+- Several components derive the backend root by removing a trailing `/screen`.
+
+Technical details flag:
+
+- `VITE_SHOW_TECHNICAL_DETAILS=false` by default.
+- When true, the UI shows developer panels, raw JSON blocks, and full export buttons.
+
+## 5. Build and Tooling Configuration
+
+### `vite.config.ts`
+
+- Uses `@vitejs/plugin-react-swc`.
+- Uses `lovable-tagger` only in development mode.
+- Dev server:
+  - host: `::`
+  - port: `8080`
+  - strict port enabled
+  - HMR overlay disabled
+- Preview server:
+  - host: `::`
+  - port: `4173`
+  - strict port enabled
+- Build:
+  - target: `es2020`
+  - source maps enabled outside production
+  - CSS code splitting enabled
+  - compressed size reporting enabled
+- Alias:
+  - `@` maps to `./src`.
+
+### `vitest.config.ts`
+
+- Uses React SWC plugin.
+- Test environment: `jsdom`.
+- Global Vitest APIs enabled.
+- Setup file: `src/test/setup.ts`.
+- Test files: `src/**/*.{test,spec}.{ts,tsx}`.
+- Alias `@` maps to `./src`.
+
+### `tailwind.config.ts`
+
+- Dark mode uses class strategy.
+- Scans files in `pages`, `components`, `app`, and `src`.
+- Defines CSS-variable driven colors for background, foreground, card, primary, secondary, destructive, muted, accent, popover, border, sidebar, warning, and success.
+- Extends fonts:
+  - sans: `Inter`, `sans-serif`
+  - mono: `JetBrains Mono`, `monospace`
+- Extends radius and accordion/pulse animations.
+- Uses `tailwindcss-animate`.
+
+### `eslint.config.js`
+
+- Uses flat ESLint config.
+- Extends JS recommended and TypeScript recommended configs.
+- Uses React Hooks and React Refresh plugins.
+- Ignores `dist`.
+- Disables `@typescript-eslint/no-unused-vars`.
+- React refresh warns on only-export-components, allowing constant exports.
+
+### `tsconfig.app.json`
+
+- Target: ES2020.
+- JSX: `react-jsx`.
+- Module resolution: bundler.
+- Strict mode is currently false.
+- Several strictness flags are disabled:
+  - `noUnusedLocals`
+  - `noUnusedParameters`
+  - `noImplicitAny`
+  - `noFallthroughCasesInSwitch`
+- Alias path:
+  - `@/*` -> `./src/*`
+
+### `railway.json`
+
+- Railway build uses `NIXPACKS`.
+
+### `components.json`
+
+- shadcn-style configuration.
+- Components alias: `@/components`.
+- UI alias: `@/components/ui`.
+- Utility alias: `@/lib/utils`.
+- Tailwind config: `tailwind.config.ts`.
+- Tailwind CSS: `src/index.css`.
+
+## 6. Application Entry and Routing
+
+### `src/main.tsx`
+
+Creates the React root and renders `<App />` inside `StrictMode`.
+
+### `src/App.tsx`
+
+Top-level app composition:
+
+- Wraps the app in `ErrorBoundary`.
+- Creates a `QueryClient` with:
+  - `retry: 1`
+  - `staleTime: 5 minutes`
+- Provides:
+  - `QueryClientProvider`
+  - `TooltipProvider`
+  - toast systems
+  - `AuthProvider`
+  - `BrowserRouter`
+- Lazily imports page components:
+  - `Index`
+  - `SettingsPage`
+  - `WatchlistPage`
+  - `AuthPage`
+  - `NotFound`
+- Routes:
+  - `/auth`: public auth page.
+  - `/*`: protected app area.
+  - `/`: main screener dashboard.
+  - `/watchlist`: watchlist page.
+  - `/settings`: settings and operations page.
+  - `*`: 404.
+
+Protected app area renders:
+
+- `AppHeader`
+- nested route content
+
+## 7. Authentication and User State
+
+### `src/contexts/AuthContext.tsx`
+
+Defines the app authentication context:
+
+- `user`
+- `loading`
+- `signIn`
+- `signUp`
+- `logout`
+- `resetPassword`
+
+Current behavior:
+
+- Uses a mock user instead of Firebase Auth.
+- `signIn` and `signUp` set a generated mock user with `uid: "mock-user"`.
+- `logout` clears the mock user.
+- `resetPassword` does nothing in mock mode.
+
+Original Firebase-backed implementation is commented in the same file. It uses:
+
+- `onAuthStateChanged`
+- `signInWithEmailAndPassword`
+- `createUserWithEmailAndPassword`
+- `signOut`
+- `sendPasswordResetEmail`
+- `auth` from `src/lib/firebase.ts`
+
+Important persistence consequence:
+
+- `useUserSettings` writes to Firestore under `users/{user.uid}`.
+- Mock auth does not provide a real Firebase auth token.
+- Firestore writes can fail until real Firebase auth is restored or Firestore rules allow the mock path.
+
+### `src/lib/firebase.ts`
+
+Initializes Firebase using `appEnv.firebase`.
+
+Exports:
+
+- `auth`: Firebase Auth instance.
+- `db`: Firestore instance.
+- default Firebase app.
+
+### `src/components/auth/ProtectedRoute.tsx`
+
+Behavior:
+
+- Shows a centered loader while auth is loading.
+- Redirects unauthenticated users to `/auth`.
+- Renders children when authenticated.
+
+## 8. Pages
+
+### `src/pages/AuthPage.tsx`
+
+Login page UI.
+
+Features:
+
+- Email and password input.
+- Password visibility toggle.
+- Forgot password/reset flow.
+- Redirects authenticated users to `/`.
+- Displays user-friendly Firebase error messages.
+- Sign-up UI is disabled; `isLogin` is hardcoded to true.
+
+Because auth is mocked, successful sign-in does not verify the password.
+
+### `src/pages/Index.tsx`
+
+Main screener dashboard.
+
+Responsibilities:
+
+- Creates screener state with `useScreener`.
+- Loads user settings with `useUserSettings`.
+- Renders `FilterSidebar`.
+- Renders title and backend `ConnectionStatus`.
+- Renders `PresetBar`.
+- Renders `RunControls`.
+- Renders status/error messages.
+- Renders `ResultsTable`.
+
+Preset flow:
+
+- Save asks for a preset name with `prompt`.
+- Saved preset contains `state.getSnapshot()`.
+- Load finds a preset and calls `state.loadSnapshot(preset.filters)`.
+
+Watchlist integration:
+
+- Passes settings watchlist to results table.
+- Star actions call Firestore-backed watchlist helpers from `useUserSettings`.
+
+### `src/pages/WatchlistPage.tsx`
+
+Standalone watchlist manager.
+
+Features:
+
+- Lists saved watchlist entries.
+- Adds new stock/crypto symbol.
+- Prevents duplicate symbols regardless of case.
+- Allows note editing on blur.
+- Removes entries.
+- Sorts entries newest first.
+
+Each watchlist entry contains:
+
+- `id`
+- `symbol`
+- `assetType`
+- optional `note`
+- `addedAt`
+
+### `src/pages/SettingsPage.tsx`
+
+Large settings and operations page.
+
+User settings controls:
+
+- API base override.
+- Admin API token.
+- API timeout in milliseconds.
+- API retry count.
+- Worker poll interval.
+- Worker batch size.
+- Indicator defaults as JSON.
+- Post-filter defaults as JSON.
+- Disabled indicators.
+- Reset password.
+- Logout.
+
+Backend operations:
+
+- Health checks:
+  - backend root health via `/healthz`
+  - readiness via `/readyz`
+- Worker operations under the screen API base:
+  - `GET /ops/worker`
+  - worker start/stop/config paths through helper
+  - `GET /ops/runtime-settings`
+- Integration operations:
+  - `GET /ops/integrations`
+  - `POST /ops/integrations/config`
+  - `GET /ops/integrations/{name}/history`
+- Diagnostics:
+  - `GET /ops/diagnose`
+
+Local runtime persistence:
+
+- API base override is mirrored to `localStorage` key `screener.apiBaseOverride`.
+- Timeout is mirrored to `screener.apiTimeoutMs`.
+- Retry count is mirrored to `screener.apiRetries`.
+- Indicator defaults are read by `src/types/screener.ts` from `screener.indicatorDefaults`.
+- Post-filter defaults are read from `screener.postFilterDefaults`.
+
+### `src/pages/NotFound.tsx`
+
+Simple 404 page.
+
+- Logs the missing path to console.
+- Displays `404`, message, and link back to `/`.
+
+## 9. Layout Components
+
+### `src/components/layout/AppHeader.tsx`
+
+Sticky top header.
+
+Includes:
+
+- App brand area.
+- `AppClock`.
+- Navigation links:
+  - Dashboard
+  - Watchlist
+  - Settings
+- Logout button when user exists.
+
+### `src/components/layout/AppClock.tsx`
+
+Live clock component.
+
+- Reads timezone from `useUserSettings`.
+- Defaults to `UTC`.
+- Updates once per second.
+- Uses `formatClockTime` from `src/lib/dates.ts`.
+
+### `src/components/NavLink.tsx`
+
+Compatibility wrapper around React Router `NavLink`.
+
+- Accepts `activeClassName` and `pendingClassName`.
+- Combines classes with `cn`.
+
+### `src/components/ErrorBoundary.tsx`
+
+Class component error boundary.
+
+- Catches render errors.
+- Logs error and React error info to console.
+- Displays fallback with error message and Reload button.
+
+## 10. Core Hook: `useScreener`
+
+File: `src/hooks/useScreener.ts`
+
+This is the main state and API orchestration hook for screening.
+
+### Filter State
+
+Maintains:
+
+- `assetType`: `stocks` or `crypto`.
+- `complianceStatus`.
+- `complianceStandards`.
+- `assetCategories`.
+- `sectors`.
+- available stock categories and sectors.
+- `excludedCategories` for crypto ethical filtering.
+- `cryptoExchanges`.
+- available crypto exchanges.
+- `timeframeMode`: `single` or `gate_entry`.
+- `singleTimeframe`.
+- `gateTimeframe`.
+- `entryTimeframe`.
+- selected `indicators`.
+- `channelRespect`.
+- `confluence`.
+- `priceRange`.
+- `deadAssets`.
+
+Default state:
+
+- asset type: `stocks`.
+- timeframe mode: `single`.
+- single timeframe: `1day`.
+- gate timeframe: `1day`.
+- entry timeframe: `4h`.
+- indicators: empty.
+- dead assets filter: enabled with `DEFAULT_DEAD_ASSETS_FILTER`.
+
+### Result State
+
+Maintains:
+
+- `results`.
+- `loading`.
+- `statusMessage`.
+- `errorMessage`.
+- `gateCompleted`.
+- `entryCompleted`.
+- `gateCount`.
+- `entryCount`.
+- `gateSessionId`.
+- `lastResultContext`.
+
+### Startup Data Fetching
+
+On mount:
+
+- Loads crypto exchange options from `${runtimeApiBase()}/crypto-exchanges`.
+- Loads stock filter options from `${runtimeApiBase()}/stock-filter-options`.
+
+Crypto exchange options are normalized to lowercase, filtered for non-empty names, and sorted.
+
+Stock filter options replace defaults only if backend returns non-empty lists.
+
+### Runtime API Settings
+
+The hook reads these from localStorage at call time:
+
+- `screener.apiBaseOverride`
+- `screener.apiTimeoutMs`
+- `screener.apiRetries`
+
+This allows Settings changes to affect future API calls without a full reload.
+
+### Request Building
+
+`buildRequestSnapshot()` returns a backend `ScreenerRequest`.
+
+Key behavior:
+
+- Stocks send `stock_sources: ["zoya"]`.
+- Crypto sends selected `exchanges`, or `null` when all exchanges are active.
+- Stock-only fields are nulled when asset type is crypto.
+- Crypto-only fields are nulled when asset type is stocks.
+- Indicators are sanitized and normalized.
+- Channel respect line/cluster values are normalized.
+- Confluence config is normalized and only sent if it has at least two sources.
+- Price range and dead asset filter are included as current state.
+
+### Indicator Safety
+
+Only these indicator names are allowed:
+
+- `rsi`
+- `wavetrend`
+- `aroon`
+- `adx`
+- `vlr`
+- `lrc`
+- `regression`
+- `trend`
+- `linreg_candles`
+- `ema`
+- `macd`
+- `volume`
+- `relative_volume`
+- `current_volume`
+- `float`
+- `shares_outstanding`
+- `volatility`
+
+Each indicator is merged with default config through `normalizeIndicatorConfig`.
+
+### Timeframe Logic
+
+Supported presets:
+
+- `1m`
+- `5m`
+- `15m`
+- `30m`
+- `1h`
+- `4h`
+- `1day`
+
+Custom strings are parsed with units:
+
+- `m`
+- `h`
+- `d`
+- `w`
+- `mo`
+- `day`
+
+Gate-entry validation:
+
+- Gate timeframe must be larger than entry timeframe.
+- If user selects a smaller gate than entry, setters normalize/swap the pair.
+- `validateGateEntryTimeframes` throws if gate is less than or equal to entry.
+
+### API Calls
+
+All screen API calls use `callAPI`.
+
+Behavior:
+
+- Uses `fetch`.
+- Adds JSON content type.
+- Sends request body as JSON.
+- Uses `AbortController` timeout.
+- Retries according to localStorage runtime retries.
+- Parses backend error detail when available.
+- Converts aborts into a clear timeout message.
+
+Endpoints:
+
+- `POST {apiBase}/run`
+- `POST {apiBase}/run-gate`
+- `POST {apiBase}/run-entry`
+- `POST {apiBase}/details`
+- `GET {apiBase}/crypto-exchanges`
+- `GET {apiBase}/stock-filter-options`
+
+### Scan Methods
+
+`runSingle()`:
+
+- Forces `timeframe_mode: "single"`.
+- Calls `POST /run`.
+- Stores result context as single scan.
+- Updates status with number of assets found.
+
+`runGate()`:
+
+- Validates timeframe pair.
+- Builds gate body with only primary indicators.
+- Calls `POST /run-gate`.
+- Stores `gate_session_id`.
+- Shows gate results.
+
+`runEntry()`:
+
+- Requires completed gate and `gate_session_id`.
+- Builds entry body with only secondary indicators.
+- Calls `POST /run-entry`.
+- Shows final entry results.
+
+`runGateEntry()`:
+
+- Runs gate, then entry automatically.
+- Skips entry if gate returns no session or zero symbols.
+- Shows status summary for both stages.
+
+### Detail and Export
+
+`fetchResultDetail(result)`:
+
+- Builds a detail request using the last scan context.
+- Calls `POST /details`.
+- Returns `ScreenerResultDetail`.
+
+`exportAllResultsDetails(onProgress)`:
+
+- Requires existing results.
+- Loads details for every result.
+- Uses concurrency of 4.
+- Returns a `ScreenerResultsBulkExport` object with:
+  - export timestamp
+  - scan context
+  - result counts
+  - loaded/failed counts
+  - summary/detail/error entries
+
+## 11. User Settings Hook
+
+File: `src/hooks/useUserSettings.ts`
+
+Stores user profile data in Firestore at:
+
+- collection: `users`
+- document id: `user.uid`
+
+Default settings:
+
+- empty `apiKey`
+- empty `adminApiToken`
+- empty `apiBaseOverride`
+- timeout `48000`
+- retries `0`
+- worker poll interval `15`
+- worker batch size `50`
+- timezone `UTC`
+- empty indicator defaults
+- empty presets
+- empty watchlist
+- empty disabled indicators
+- empty post-filter defaults
+
+Exposes:
+
+- `settings`
+- `loading`
+- `saveSettings(partial)`
+- `savePreset(name, filters)`
+- `deletePreset(id)`
+- `addWatchlistEntry(symbol, assetType, note?)`
+- `updateWatchlistEntry(id, patch)`
+- `removeWatchlistEntry(id)`
+
+Uses `sonner` toast messages for save success/failure.
+
+## 12. Screener UI Components
+
+### `FilterSidebar.tsx`
+
+Composes all filter components in a collapsible sidebar.
+
+Sections:
+
+- Filters:
+  - asset type
+  - price range
+  - stock-only compliance/category/sector filters
+  - crypto-only exchange/ethical filters
+  - dead assets
+  - indicators
+  - channel respect
+  - confluence
+- Timeframe
+- Developer tools, only when technical details flag is true
+
+Developer tools:
+
+- Copy current request payload as JSON.
+- Copy/export all result detail JSON.
+
+### `RunControls.tsx`
+
+Displays a single `Run Scan` button.
+
+- In single mode, calls `runSingle`.
+- In gate-entry mode, calls `runGateEntry`.
+- Shows spinner while loading.
+
+### `ConnectionStatus.tsx`
+
+Checks backend connectivity once on mount.
+
+- Sends `GET` to backend root.
+- Timeout: 5 seconds.
+- Shows checking, connected, or disconnected state.
+- It intentionally does not poll repeatedly to avoid keeping scale-to-zero backends awake.
+
+### `PresetBar.tsx`
+
+Shows preset controls:
+
+- Save preset button.
+- Load saved presets.
+- Delete saved presets.
+- Loading state.
+- Empty state.
+
+### `ResultsTable.tsx`
+
+Large results workspace component.
+
+Features:
+
+- Loading state.
+- Search across symbol, source, category, and visible stickers.
+- Sort by:
+  - symbol
+  - price
+  - source
+  - timeframe
+  - category
+- Sort direction toggle.
+- Pagination with page size 25.
+- View mode state for table/compact views.
+- Watchlist-only toggle.
+- Category filter popover with search.
+- Category list pages large category lists in chunks of 100.
+- Min/max price filtering.
+- Watchlist star toggle.
+- Row detail loading.
+- Result comparison support for up to two symbols.
+- Excel-compatible `.xls` CSV export.
+- Full JSON detail export when technical details are enabled.
+
+Important helper behavior:
+
+- `formatPrice` adjusts decimals by price size.
+- `getPrimaryCategory` maps row stickers to indicator categories.
+- `stickersForRow` hides stickers that are not part of active indicators when matched indicator names are available.
+- Detail requests use a request id ref to ignore stale responses if the selected result changes quickly.
+
+### `ResultDetailPanel.tsx`
+
+Shows explanation and technical details for a selected result.
+
+Displays:
+
+- symbol
+- asset type
+- scan stage
+- timeframe
+- name
+- latest price
+- data source/exchange
+- last completed candle
+- category/compliance
+- candles used
+- exchange availability
+- matched stickers
+- loading/error states
+
+When detail is loaded:
+
+- Shows indicator checks.
+- Shows passed/failed counts.
+- Shows post-filter details.
+- Shows market data provider.
+- Shows extra metadata in technical mode.
+
+Special LinReg Candles detail:
+
+- Dedicated card for Linear Regression Candles evidence.
+- Displays checked candle time.
+- Displays virtual LinReg OHLC.
+- Displays raw OHLC.
+- Displays white signal line.
+- Explains skipped forming bars.
+- Shows rule checks and settings.
+
+Technical mode adds JSON blocks:
+
+- request filters
+- asset metadata
+- last candle
+- recent candles
+- channels
+- confluence channels
+- indicator config/evidence
+- filter details
+
+### `indicatorColors.ts`
+
+Maps sticker text to category colors using indicator category definitions.
+
+Falls back to:
+
+- confluence color when badge includes `confluence`
+- channel color when badge includes `channel` or `respect`
+- primary color otherwise
+
+### `dev/CopyAllStocksDetailsButton.tsx`
+
+Developer export component.
+
+Behavior:
+
+- Calls `onExportAllDetails`.
+- Tracks progress.
+- Copies JSON to clipboard when size is reasonable.
+- Downloads JSON when payload is very large or clipboard fails.
+- Filename format: `screener-results-{iso-stamp}.json`.
+
+## 13. Filter Components
+
+### `AssetTypeFilter.tsx`
+
+Simple two-button selector:
+
+- `stocks`
+- `crypto`
+
+### `ComplianceFilter.tsx`
+
+Stock compliance status selector.
+
+Statuses:
+
+- compliant
+- non-compliant
+- questionable
+
+Also shows standards in a collapsible list:
+
+- AAOIFI
+- Dow Jones Islamic
+- MSCI Islamic
+- MSCI Islamic Market
+- S&P Shariah
+- FTSE Shariah
+
+Only AAOIFI is visually active; standard buttons are disabled.
+
+### `AssetCategoryFilter.tsx`
+
+Stock category selector.
+
+Normalizes selected ids to lowercase.
+
+Default categories from `src/types/screener.ts`:
+
+- NASDAQ
+- NYSE
+- AMEX
+- ETF
+- S&P 500
+- Dow Jones
+- Russell 2000
+
+Backend can replace these options with `/stock-filter-options`.
+
+### `SectorFilter.tsx`
+
+Stock sector selector.
+
+Default sectors:
+
+- Technology
+- Healthcare
+- Financials
+- Consumer Cyclical
+- Consumer Defensive
+- Industrials
+- Energy
+- Utilities
+- Real Estate
+- Communication Services
+- Basic Materials
+- Other
+
+Backend can replace these options with `/stock-filter-options`.
+
+### `EthicalFilter.tsx`
+
+Crypto excluded category selector.
+
+Options:
+
+- Memecoins
+- Gambling
+- Interest
+- Adult
+- Scam
+
+Uses `CheckboxGroup`.
+
+### `CryptoExchangeFilter.tsx`
+
+Crypto exchange dropdown.
+
+Features:
+
+- Empty selection means all exchanges.
+- Searchable list.
+- Shows coin count per exchange.
+- One-click "All exchanges" reset.
+- Lowercases exchange names.
+- If user selects every exchange, it collapses back to empty/all.
+
+### `TimeframeFilter.tsx`
+
+Timeframe mode and timeframe selector.
+
+Modes:
+
+- Single
+- Gate -> Entry
+
+Preset timeframes:
+
+- `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1day`
+
+Custom controls:
+
+- amount number input
+- unit selector:
+  - minutes
+  - hours
+  - days
+  - weeks
+  - months
+
+Custom values that match presets are formatted with a space, such as `1 m`, to keep the UI in Custom mode.
+
+### `IndicatorsFilter.tsx`
+
+Largest filter component. Manages adding, removing, collapsing, and editing indicator configs.
+
+Indicator labels:
+
+- RSI
+- WaveTrend
+- Aroon
+- Trendy ADX
+- VLR Precision Filter
+- Linear Regression Channel
+- Regression Channel
+- Trend Channel
+- Linear Regression Candles
+- EMA
+- MACD
+- Volume Spike
+- Relative Volume
+- Current Volume
+- Float
+- Shares Outstanding
+- Volatility
+
+Features:
+
+- Add indicator picker.
+- Disabled indicators are hidden from the add picker.
+- Existing disabled indicators remain usable if already selected.
+- Per-indicator timeframe scope:
+  - single mode: `single`
+  - gate-entry mode: `primary` or `secondary`
+- Reset indicator config to defaults.
+- Summary text per indicator based on selected config.
+- Field rendering based on `INDICATOR_DEFINITIONS`.
+- Number/select/multi-select/boolean fields.
+- Special area-list editor for Trend Channel.
+- Special condition-list editor for Trendy ADX.
+- Hides dependent VLR fields unless relevant toggles are enabled.
+
+Special Trend Channel area rules:
+
+- Areas:
+  - top line
+  - middle line
+  - bottom line
+  - top zone
+  - bottom zone
+- Line actions:
+  - touched
+  - closed above
+  - closed below
+  - on line
+- Zone actions:
+  - entered
+  - rejected
+  - breach
+- Optional touch type, breach type, breach direction, window, tolerance, confirmation type/window/patterns.
+
+Special Trendy ADX condition editor:
+
+- Supports bullish, bearish, compression, and weak modes.
+- Conditions can require:
+  - no sub value
+  - candles since event
+  - distance/closeness value
+
+### `PresetOrCustomField.tsx`
+
+Reusable numeric field.
+
+- Shows preset dropdown.
+- Switches to number input when Custom is selected or current value is not a preset.
+
+### `CheckboxGroup.tsx`
+
+Reusable pill-style multi-select button group.
+
+- Supports disabled options.
+- Toggles selected values.
+
+### `PriceRangeFilter.tsx`
+
+Optional min/max average price filter.
+
+- Disabled state sends `null`.
+- Enabled empty min/max means any price.
+- Invalid numeric input is normalized to `null`.
+
+### `ChannelRespectFilter.tsx`
+
+Optional post-filter for channel respect.
+
+Controls:
+
+- channel type:
+  - LRC
+  - Regression
+  - Trend
+- line selection:
+  - upper
+  - lower
+  - middle
+  - upper+lower
+  - upper+middle
+  - lower+middle
+  - all
+- min touches
+- max touches
+- tolerance percent
+- touch detail:
+  - wick
+  - body
+  - wick/body
+- cluster window, constrained from 3 to 5 candles
+
+Default config comes from `getDefaultChannelRespectConfig()`.
+
+### `ConfluenceFilter.tsx`
+
+Optional post-filter for two-source channel confluence.
+
+Types:
+
+- bullish
+- bearish
+- breakout
+- any
+
+Channel sources:
+
+- exactly two sources are normalized
+- source channel type can be:
+  - LRC
+  - Regression Channel
+  - Trend Channel
+- source selection options depend on channel:
+  - trend: top line, middle line, bottom line, top zone, bottom zone
+  - LRC/regression: upper, middle, lower
+- source length is configurable
+
+Other controls:
+
+- require liquidity sweep
+- lookback candles, constrained 1 to 4
+- tolerance percent
+
+Legacy `role_reversal` type is normalized to `breakout`.
+
+### `DeadAssetsFilter.tsx`
+
+Optional filter for excluding long-term weak/dead assets.
+
+Enabled by default from `DEFAULT_DEAD_ASSETS_FILTER`.
+
+Controls:
+
+- dead trend types:
+  - strong dead trend
+  - slow bleeding trend
+  - failed recovery
+  - flat dead asset
+- lower highs required
+- lower lows required
+- trend confirmation source:
+  - EMA 50
+  - EMA 100
+  - EMA 200
+  - linear regression
+- recovery lookback
+- volume rule:
+  - low
+  - declining
+  - either
+- volatility rule:
+  - low ATR
+  - very low ATR
+  - either
+- bounce threshold percent
+- failure window
+- recovery override:
+  - disabled
+  - wick above swing high
+  - close above swing high
+  - two closes above swing high
+
+## 14. Types and Screener Domain Model
+
+File: `src/types/screener.ts`
+
+This file is the main schema/catalog module. It defines frontend-side request/response types, indicator definitions, default configs, and normalization helpers.
+
+### Core Types
+
+- `AssetType`: `stocks` or `crypto`.
+- `ScanStage`: `single`, `gate`, `entry`.
+- `TimeframeMode`: `single`, `gate_entry`.
+- `ComplianceStatus`: `compliant`, `non-compliant`, `questionable`.
+- `IndicatorTimeframe`: `single`, `primary`, `secondary`.
+- `IndicatorName`: all supported indicator ids.
+- `ChannelType`: `lrc`, `regression`, `trend`.
+- `ChannelLine`: allowed line combinations for channel respect.
+- `ConfluenceSelection`: allowed channel confluence line/zone selections.
+
+### Request Types
+
+`ScreenerRequest` contains:
+
+- asset type
+- stock sources
+- compliance filters
+- categories/sectors/exchanges/exclusions
+- timeframe mode and timeframe values
+- gate session id
+- indicators
+- channel respect
+- confluence
+- price range
+- dead assets filter
+
+`ScreenerDetailRequest` contains:
+
+- symbol
+- asset type
+- timeframe
+- scan stage
+- full request context
+
+### Response Types
+
+`ScreenerResult` contains:
+
+- symbol
+- price
+- asset type
+- data source
+- scan stage
+- name/category/sector metadata
+- CMC id/rank for crypto
+- compliance data
+- candle data summary
+- exchange info
+- timeframe
+- note
+- stickers
+- matched indicator names
+
+`ScreenerResultDetail` extends `ScreenerResult` with:
+
+- asset metadata
+- request filters
+- indicator details
+- filter details
+- market data
+- channels
+- confluence channels
+
+Bulk export types:
+
+- `ScreenerResultExportEntry`
+- `ScreenerResultsBulkExport`
+
+### Indicator Categories
+
+Indicator categories:
+
+- momentum
+- trend
+- volume
+- channel
+- confluence
+
+Mapped indicators:
+
+- momentum: RSI, WaveTrend, MACD
+- trend: Aroon, ADX, LinReg Candles, EMA, Volatility
+- volume: volume, relative volume, current volume, float, shares outstanding
+- channel: LRC, regression, trend channel
+
+### Indicator Definitions
+
+`INDICATOR_DEFINITIONS` drives the indicator editor UI.
+
+Each indicator definition includes:
+
+- name
+- fields
+- each field key/label/type/options
+
+Supported field types:
+
+- number
+- select
+- multi-select
+- boolean
+- area-list
+- condition-list
+
+### Default Indicator Configs
+
+Defaults are stored in `INDICATOR_DEFAULT_CONFIGS`.
+
+Notable defaults:
+
+- RSI: length 14, oversold, turning up.
+- WaveTrend: channel length 10, average length 21, signal length 4, threshold 35.
+- Aroon: length 14, level above 50, rising.
+- ADX: length 11, threshold 20, bullish mode, `adx_above_20` condition.
+- VLR: close source, 3 regressions, start period 12, increment 12, deviation 2.
+- LRC: length 100, upper/lower dev 2, middle line touch.
+- Regression: length 200, width coefficient 1, continuous window.
+- Trend channel: length 8, show last channel, wait for break.
+- LinReg Candles: TV-style length 11 and signal smoothing 11.
+- EMA: length 9, above.
+- MACD: fast 12, slow 26, signal 9, bullish cross.
+- Volume spike: length 20, multiplier 2.
+- Relative volume: length 20, min ratio 1.5.
+- Current volume/float/shares outstanding: min 0, max null.
+- Volatility: length 20, min 0, max null.
+
+Runtime overrides:
+
+- `getDefaultIndicatorConfig` reads `localStorage["screener.indicatorDefaults"]`.
+- It supports legacy `volume_spike` by mapping it to internal `volume`.
+- Overrides are merged over hardcoded defaults.
+
+### Post-Filter Defaults
+
+Channel respect default:
+
+- channel type `trend`
+- line `both`
+- min respect `2`
+- max respect `null`
+- tolerance `0.1`
+- cluster gap `3`
+- touch type `wick`
+
+Confluence default:
+
+- type `bullish`
+- sources `trend` and `lrc`
+- liquidity sweep false
+- lookback candles 4
+- tolerance 0.1
+
+Runtime post-filter overrides:
+
+- read from `localStorage["screener.postFilterDefaults"]`
+- keys:
+  - `channel_respect`
+  - `confluence`
+
+### Normalization Helpers
+
+- `getAllDefaultIndicatorConfigs()`
+- `getDefaultIndicatorConfig(name)`
+- `getDefaultChannelRespectConfig()`
+- `getDefaultConfluenceConfig()`
+- `normalizeIndicatorConfig(indicator)`
+- `getDefaultChannelLength(channelType)`
+- `getConfluenceSelectionOptions(channelType)`
+- `getDefaultConfluenceSelection(channelType, confluenceType, sourceIndex)`
+- `formatConfluenceSelectionLabel(selection)`
+- `createConfluenceSource(channelType, overrides, fallbackIndex, confluenceType)`
+- `normalizeConfluenceConfig(confluence)`
+
+Confluence normalization:
+
+- Null input stays null.
+- Unknown or legacy types normalize safely.
+- `role_reversal` becomes `breakout`.
+- Always keeps two sources.
+- Clamps lookback candles to 1-4.
+- Ensures source length is at least 2.
+- Mirrors `channels` from source channel types.
+
+## 15. Utility Modules
+
+### `src/config/env.ts`
+
+Centralized environment reader.
+
+Functions:
+
+- `sanitizeBaseUrl`
+- `readRequired`
+- `readOptional`
+- `readBool`
+
+Exports:
+
+- `appEnv`
+
+### `src/lib/dates.ts`
+
+Date/time formatting helpers.
+
+Exports:
+
+- `DEFAULT_APP_TIMEZONE`
+- `formatDateTime(date, timeZone)`
+- `formatClockTime(date, timeZone)`
+- `formatUnixSeconds(value, timeZone)`
+- `formatDateValue(value, timeZone)`
+
+Invalid or missing values display `N/A`.
+
+### `src/lib/copyText.ts`
+
+Clipboard/download helpers.
+
+Exports:
+
+- `copyTextToClipboard(text)`
+- `downloadTextFile(filename, text, mimeType)`
+- `copyOrDownloadLargeJson(payload, downloadFilename)`
+
+Large JSON over 1,500,000 characters is downloaded instead of copied.
+
+### `src/lib/utils.ts`
+
+Exports `cn`, which combines `clsx` and `tailwind-merge`.
+
+### `src/hooks/use-mobile.tsx`
+
+Returns true when viewport width is below 768px.
+
+### `src/hooks/use-toast.ts`
+
+Local toast store/hook used by the shadcn toast system.
+
+Exports:
+
+- `useToast`
+- `toast`
+- reducer and supporting types internally
+
+## 16. Styling
+
+### `src/index.css`
+
+Imports Google fonts:
+
+- JetBrains Mono
+- Space Grotesk
+
+Tailwind layers:
+
+- base
+- components
+- utilities
+
+Theme:
+
+- dark financial-dashboard style.
+- CSS variables define all design tokens.
+- Body background uses radial/linear gradients.
+- Utility classes include:
+  - `.scrollbar-thin`
+  - `.glass-panel`
+  - `.ambient-grid`
+
+### `src/App.css`
+
+Minimal file with no meaningful app-level styling.
+
+## 17. UI Component Library
+
+Directory: `src/components/ui`
+
+This directory contains shadcn/Radix-style reusable UI primitives. Most are wrappers around Radix primitives with Tailwind classes and forwarded refs.
+
+Components include:
+
+- accordion
+- alert
+- alert-dialog
+- aspect-ratio
+- avatar
+- badge
+- breadcrumb
+- button
+- calendar
+- card
+- carousel
+- chart
+- checkbox
+- collapsible
+- command
+- context-menu
+- dialog
+- drawer
+- dropdown-menu
+- form
+- hover-card
+- input
+- input-otp
+- label
+- menubar
+- navigation-menu
+- pagination
+- popover
+- progress
+- radio-group
+- resizable
+- scroll-area
+- select
+- separator
+- sheet
+- sidebar
+- skeleton
+- slider
+- sonner
+- switch
+- table
+- tabs
+- textarea
+- toast
+- toaster
+- toggle
+- toggle-group
+- tooltip
+- use-toast re-export
+
+The most custom/important UI component is `sidebar.tsx`.
+
+`sidebar.tsx` provides:
+
+- `SidebarProvider`
+- `Sidebar`
+- `SidebarTrigger`
+- `SidebarContent`
+- `SidebarGroup`
+- `SidebarGroupLabel`
+- `SidebarGroupContent`
+- many menu/submenu primitives
+
+Sidebar behavior:
+
+- Supports desktop and mobile state.
+- Persists open state in cookie `sidebar:state`.
+- Uses keyboard shortcut `b`.
+- Uses fixed top offset matching the app header.
+
+## 18. API Contract Summary
+
+Screen API base is normally `VITE_API_BASE`, defaulting to `http://localhost:8000/screen` in development.
+
+Screen endpoints used by the dashboard:
+
+- `GET /crypto-exchanges`
+- `GET /stock-filter-options`
+- `POST /run`
+- `POST /run-gate`
+- `POST /run-entry`
+- `POST /details`
+
+Backend root endpoints used by status/settings:
+
+- `GET /`
+- `GET /healthz`
+- `GET /readyz`
+
+Ops endpoints used by settings:
+
+- `GET /ops/worker`
+- worker mutation paths through the worker helper
+- `GET /ops/runtime-settings`
+- `GET /ops/integrations`
+- `POST /ops/integrations/config`
+- `GET /ops/integrations/{name}/history`
+- `GET /ops/diagnose`
+
+Request payloads are JSON and match `ScreenerRequest` or `ScreenerDetailRequest`.
+
+## 19. Data Persistence
+
+Firestore document:
+
+- `users/{uid}`
+
+Stored user data:
+
+- API settings
+- admin token
+- timezone
+- indicator defaults
+- post-filter defaults
+- saved presets
+- watchlist
+- disabled indicators
+- worker settings
+
+LocalStorage keys:
+
+- `screener.apiBaseOverride`
+- `screener.apiTimeoutMs`
+- `screener.apiRetries`
+- `screener.indicatorDefaults`
+- `screener.postFilterDefaults`
+
+## 20. Tests
+
+### `src/test/setup.ts`
+
+Test setup:
+
+- Imports jest-dom matchers.
+- Mocks `window.matchMedia`.
+- Mocks `ResizeObserver` on `window` and `globalThis`.
+
+### `src/test/example.test.ts`
+
+Simple placeholder passing test.
+
+### `src/test/indicator-defaults.test.ts`
+
+Tests:
+
+- EMA and channel default values.
+- Confluence channel length helper values.
+- Missing indicator config fields are filled from defaults.
+
+### `src/test/confluence-config.test.ts`
+
+Tests:
+
+- Breakout confluence is preserved.
+- Any confluence is preserved.
+- Legacy role reversal normalizes into breakout with two explicit sources.
+- Lookback is clamped to 4.
+
+### `src/components/screener/ResultsTable.test.tsx`
+
+Tests:
+
+- Category filter can reopen correctly after repeated selections.
+- Large category lists are paged.
+- Category search finds hidden/paged categories.
+- Clearing search resets visible categories until "show more" is clicked.
+
+### `src/components/screener/filters/CryptoExchangeFilter.test.tsx`
+
+Tests:
+
+- Empty selection means all exchanges.
+- Selecting an exchange from all mode sends that exchange.
+- One-click all-exchanges reset sends empty array.
+- Removing the last selected exchange falls back to all.
+- Search field filters exchange options.
+
+## 21. File-by-File Inventory
+
+Root files:
+
+- `.env`: local environment values. Do not commit secrets.
+- `.gitignore`: ignore rules.
+- `.npmrc`: npm configuration.
+- `.nvmrc`: Node version.
+- `components.json`: shadcn configuration.
+- `eslint.config.js`: ESLint flat config.
+- `index.html`: Vite HTML entry.
+- `package.json`: scripts and dependencies.
+- `package-lock.json`: locked dependency versions.
+- `postcss.config.js`: PostCSS/Tailwind pipeline.
+- `railway.json`: Railway deployment builder.
+- `README.md`: concise setup instructions.
+- `tailwind.config.ts`: Tailwind theme/config.
+- `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`: TypeScript configs.
+- `vite.config.ts`: Vite config.
+- `vitest.config.ts`: Vitest config.
+
+Public assets:
+
+- `public/favicon.ico`: browser favicon.
+- `public/placeholder.svg`: placeholder image.
+- `public/robots.txt`: robots file.
+
+Source files:
+
+- `src/main.tsx`: React root mount.
+- `src/App.tsx`: providers and routing.
+- `src/App.css`: minimal CSS.
+- `src/index.css`: Tailwind imports and global theme.
+- `src/vite-env.d.ts`: Vite env typings.
+- `src/config/env.ts`: environment reader.
+- `src/lib/firebase.ts`: Firebase init.
+- `src/lib/utils.ts`: class name helper.
+- `src/lib/dates.ts`: time/date formatting.
+- `src/lib/copyText.ts`: clipboard/download helpers.
+- `src/contexts/AuthContext.tsx`: mock auth and commented Firebase auth.
+- `src/hooks/useScreener.ts`: main screener state and API hook.
+- `src/hooks/useUserSettings.ts`: Firestore-backed settings/preset/watchlist hook.
+- `src/hooks/use-mobile.tsx`: responsive breakpoint hook.
+- `src/hooks/use-toast.ts`: local toast state.
+- `src/pages/AuthPage.tsx`: login/reset page.
+- `src/pages/Index.tsx`: main screener page.
+- `src/pages/SettingsPage.tsx`: settings/admin/ops page.
+- `src/pages/WatchlistPage.tsx`: watchlist manager.
+- `src/pages/NotFound.tsx`: 404 page.
+- `src/types/screener.ts`: domain types, indicator catalog, defaults, normalizers.
+- `src/components/ErrorBoundary.tsx`: app error boundary.
+- `src/components/NavLink.tsx`: router nav compatibility component.
+- `src/components/auth/ProtectedRoute.tsx`: auth gate.
+- `src/components/layout/AppHeader.tsx`: top navigation.
+- `src/components/layout/AppClock.tsx`: live timezone clock.
+- `src/components/screener/ConnectionStatus.tsx`: backend connection status.
+- `src/components/screener/FilterSidebar.tsx`: filter/sidebar composition.
+- `src/components/screener/indicatorColors.ts`: badge color mapping.
+- `src/components/screener/PresetBar.tsx`: preset actions.
+- `src/components/screener/ResultDetailPanel.tsx`: selected result detail/explanation panel.
+- `src/components/screener/ResultsTable.tsx`: result table, filtering, sorting, detail loading, export.
+- `src/components/screener/RunControls.tsx`: run scan button.
+- `src/components/screener/dev/CopyAllStocksDetailsButton.tsx`: developer full export button.
+- `src/components/screener/filters/*`: all filter editors.
+- `src/components/ui/*`: reusable UI primitives.
+- `src/test/*`: test setup and domain tests.
+
+## 22. Current Risks and Caveats
+
+1. Auth is mocked.
+   Firestore persistence may fail until real Firebase auth is restored.
+
+2. TypeScript strictness is relaxed.
+   `strict`, `noImplicitAny`, and unused checks are off, so some type issues may be hidden.
+
+3. API calls are handwritten.
+   There is no generated API client or runtime schema validation, so backend/frontend contract drift can surface at runtime.
+
+4. Settings page is large.
+   `SettingsPage.tsx` has many responsibilities: profile settings, backend health, worker ops, provider config, diagnostics, and JSON editors.
+
+5. `ResultsTable.tsx`, `IndicatorsFilter.tsx`, and `useScreener.ts` are also large.
+   They hold meaningful business logic and could benefit from future splitting if they keep growing.
+
+6. `.env` exists locally.
+   Keep it private and do not expose real keys in docs, logs, commits, or screenshots.
+
+7. `package-lock.json` is currently modified in git status.
+   This documentation did not intentionally change it.
+
+## 23. How to Run Locally
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Ensure `.env` contains required Firebase variables.
+
+3. Start backend, normally at:
+
+```bash
+http://localhost:8000
+```
+
+4. Start frontend:
+
+```bash
+npm run dev
+```
+
+5. Open Vite URL, configured as:
+
+```bash
+http://localhost:8080
+```
+
+## 24. How to Validate
+
+Run:
+
+```bash
+npm run typecheck
+npm run lint
+npm run test
+```
+
+Or all together:
+
+```bash
+npm run check
+```
+
+Production build:
+
+```bash
+npm run build
+```
+
+Preview build:
+
+```bash
+npm run preview
+```
+
+## 25. Suggested Future Improvements
+
+- Restore real Firebase Auth when project access is available.
+- Add `.env.example` with variable names and safe placeholders.
+- Split `SettingsPage.tsx` into smaller sections/hooks.
+- Split `ResultsTable.tsx` filters/export/detail logic into smaller hooks.
+- Add runtime validation for backend responses with `zod`.
+- Add tests for `useScreener` request-building behavior.
+- Add tests for Settings localStorage persistence.
+- Add integration tests for single and gate-entry scan flows with mocked backend responses.
+- Consider enabling stricter TypeScript options gradually.
+
