@@ -60,3 +60,60 @@ export function formatDateValue(
 
   return formatDateTime(date, timeZone);
 }
+
+export interface LatestCandleConsidered {
+  dateLabel: string;
+  timeLabel: string;
+  utcLabel: string;
+  statusLabel: string | null;
+}
+
+export function describeLatestCandleConsidered(
+  lastCandleTime: number | null | undefined,
+  options?: {
+    timeZone?: string;
+    isClosed?: boolean | null;
+  },
+): LatestCandleConsidered {
+  const timeZone = options?.timeZone ?? DEFAULT_APP_TIMEZONE;
+
+  if (lastCandleTime === null || lastCandleTime === undefined) {
+    return {
+      dateLabel: "N/A",
+      timeLabel: "",
+      utcLabel: "",
+      statusLabel: null,
+    };
+  }
+
+  const date = new Date(lastCandleTime * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return {
+      dateLabel: "N/A",
+      timeLabel: "",
+      utcLabel: "",
+      statusLabel: null,
+    };
+  }
+
+  const dateLabel = date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone,
+  });
+  const timeLabel = formatDateTime(date, timeZone);
+  const utcLabel = formatDateTime(date, "UTC");
+  const statusLabel = options?.isClosed === false
+    ? "Still forming"
+    : options?.isClosed === true
+      ? "Marked closed"
+      : null;
+
+  return {
+    dateLabel,
+    timeLabel,
+    utcLabel,
+    statusLabel,
+  };
+}

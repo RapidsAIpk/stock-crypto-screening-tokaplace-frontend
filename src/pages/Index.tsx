@@ -86,6 +86,7 @@ const Index = () => {
               <ResultsTable
                 results={state.results}
                 loading={state.loading}
+                scanProgress={state.scanProgress}
                 onRequestDetail={state.fetchResultDetail}
                 onExportAllDetails={appEnv.showTechnicalDetails ? state.exportAllResultsDetails : undefined}
                 activeSignalNames={[

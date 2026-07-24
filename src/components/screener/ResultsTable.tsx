@@ -13,19 +13,23 @@ import {
   Star,
 } from "lucide-react";
 import { INDICATOR_CATEGORY_MAP } from "@/types/screener";
-import type { ScreenerResult, ScreenerResultDetail, ScreenerResultsBulkExport, IndicatorCategory } from "@/types/screener";
+import type { ScreenerResult, ScreenerResultDetail, ScreenerResultsBulkExport, IndicatorCategory, ScanProgressState } from "@/types/screener";
 import { ResultDetailPanel } from "./ResultDetailPanel";
+import { ScanProgressPanel } from "./ScanProgressPanel";
 import { getIndicatorColor } from "./indicatorColors";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { WatchlistEntry } from "@/hooks/useUserSettings";
+import { useUserSettings } from "@/hooks/useUserSettings";
 import { appEnv } from "@/config/env";
+import { describeLatestCandleConsidered } from "@/lib/dates";
 import { CopyAllStocksDetailsButton } from "./dev/CopyAllStocksDetailsButton";
 import { CopyStockNamesButton } from "./dev/CopyStockNamesButton";
 
 interface Props {
   results: ScreenerResult[];
   loading: boolean;
+  scanProgress?: ScanProgressState | null;
   activeSignalNames?: string[];
   onRequestDetail: (result: ScreenerResult) => Promise<ScreenerResultDetail>;
   onExportAllDetails?: (
@@ -36,7 +40,7 @@ interface Props {
   onRemoveWatchlistEntry?: (id: string) => void;
 }
 
-type SortKey = "symbol" | "price" | "data_source" | "timeframe" | "category";
+type SortKey = "symbol" | "price" | "data_source" | "timeframe" | "last_candle_time" | "category";
 type SortDir = "asc" | "desc";
 type ViewMode = "table" | "compact";
 
@@ -117,6 +121,7 @@ function getCategoryTone(category: ReturnType<typeof getPrimaryCategory>) {
 export function ResultsTable({
   results,
   loading,
+  scanProgress = null,
   activeSignalNames = EMPTY_SIGNAL_NAMES,
   onRequestDetail,
   onExportAllDetails,
@@ -124,6 +129,8 @@ export function ResultsTable({
   onAddWatchlistEntry,
   onRemoveWatchlistEntry,
 }: Props) {
+  const { settings } = useUserSettings();
+  const timeZone = settings.timezone || "UTC";
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -246,8 +253,16 @@ export function ResultsTable({
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      const aVal = sortKey === "category" ? categoryLabelForRow(a) : a[sortKey];
-      const bVal = sortKey === "category" ? categoryLabelForRow(b) : b[sortKey];
+      const aVal = sortKey === "category"
+        ? categoryLabelForRow(a)
+        : sortKey === "last_candle_time"
+          ? (a.last_candle_time ?? 0)
+          : a[sortKey];
+      const bVal = sortKey === "category"
+        ? categoryLabelForRow(b)
+        : sortKey === "last_candle_time"
+          ? (b.last_candle_time ?? 0)
+          : b[sortKey];
       if (typeof aVal === "number" && typeof bVal === "number") {
         return sortDir === "asc" ? aVal - bVal : bVal - aVal;
       }
@@ -433,10 +448,14 @@ export function ResultsTable({
   if (loading) {
     return (
       <div className="flex items-center justify-center rounded-[24px] border border-border/70 bg-card/60 p-12">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm font-mono">Scanning markets...</span>
-        </div>
+        {scanProgress ? (
+          <ScanProgressPanel progress={scanProgress} />
+        ) : (
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm font-mono">Scanning markets...</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -446,6 +465,7 @@ export function ResultsTable({
     ["price", "Price"],
     ["data_source", "Source"],
     ["timeframe", "Timeframe"],
+    ["last_candle_time", "Latest Candle"],
     ["category", "Category"],
   ];
 
@@ -745,7 +765,7 @@ export function ResultsTable({
                       Compare
                     </th>
                     {columns
-                      .filter(([key]) => viewMode === "table" || !["data_source", "timeframe"].includes(key))
+                      .filter(([key]) => viewMode === "table" || !["data_source", "timeframe", "last_candle_time"].includes(key))
                       .map(([key, label]) => (
                       <th
                         key={key}
@@ -774,6 +794,7 @@ export function ResultsTable({
                   {paged.map((row) => {
                     const visibleStickers = stickersForRow(row);
                     const rowCategory = categoryLabelForRow(row);
+                    const latestCandle = describeLatestCandleConsidered(row.last_candle_time, { timeZone });
                     return (
                       <tr
                         key={`${row.symbol}-${row.data_source}-${row.timeframe}`}
@@ -833,6 +854,19 @@ export function ResultsTable({
                       )}
                       {viewMode === "table" && (
                         <td className="px-4 py-3 font-mono text-secondary-foreground">{row.timeframe}</td>
+                      )}
+                      {viewMode === "table" && (
+                        <td className="px-4 py-3">
+                          <div className="font-mono text-sm text-foreground">{latestCandle.dateLabel}</div>
+                          <div className="text-[11px] leading-4 text-muted-foreground">
+                            {latestCandle.timeLabel}
+                          </div>
+                          {latestCandle.utcLabel !== latestCandle.timeLabel ? (
+                            <div className="text-[10px] leading-4 text-muted-foreground/80">
+                              UTC {latestCandle.utcLabel}
+                            </div>
+                          ) : null}
+                        </td>
                       )}
                       <td className="px-4 py-3 text-secondary-foreground">{rowCategory}</td>
                       {viewMode === "table" && (

@@ -483,7 +483,10 @@ const BREACH_DIRECTIONS = [
   "down",
 ] as const;
 
+export const TREND_CHANNEL_DISABLED = "disabled" as const;
+
 export const TREND_CHANNEL_AREAS = [
+  TREND_CHANNEL_DISABLED,
   "top_line",
   "middle_line",
   "bottom_line",
@@ -491,7 +494,14 @@ export const TREND_CHANNEL_AREAS = [
   "bottom_zone",
 ] as const;
 
+export function isTrendAreaRuleDisabled(area?: Partial<AreaRule> | null): boolean {
+  const areaName = String(area?.area || "").trim().toLowerCase();
+  const action = String(area?.action || "").trim().toLowerCase();
+  return areaName === TREND_CHANNEL_DISABLED || action === TREND_CHANNEL_DISABLED;
+}
+
 export const TREND_CHANNEL_LINE_ACTIONS = [
+  TREND_CHANNEL_DISABLED,
   "touched",
   "closed_above",
   "closed_below",
@@ -499,6 +509,7 @@ export const TREND_CHANNEL_LINE_ACTIONS = [
 ] as const;
 
 export const TREND_CHANNEL_ZONE_ACTIONS = [
+  TREND_CHANNEL_DISABLED,
   "entered",
   "rejected",
   "breach",
@@ -1476,4 +1487,34 @@ export function normalizeConfluenceConfig(confluence: Confluence | null): Conflu
       ? Number(confluence.tolerance_pct)
       : 0.1,
   };
+}
+
+export interface ScanProgressEvent {
+  type?: string;
+  scan_id?: string;
+  timestamp?: number;
+  stage?: string;
+  message?: string;
+  symbol?: string | null;
+  current?: number | null;
+  total?: number | null;
+  detail?: string | null;
+}
+
+export interface ScanProgressLogEntry {
+  stage: string;
+  message: string;
+  symbol: string | null;
+  timestamp: number;
+}
+
+export interface ScanProgressState {
+  connected: boolean;
+  stage: string | null;
+  message: string;
+  symbol: string | null;
+  current: number | null;
+  total: number | null;
+  detail: string | null;
+  log: ScanProgressLogEntry[];
 }

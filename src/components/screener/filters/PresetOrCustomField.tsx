@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface PresetOrCustomProps {
   label: string;
@@ -22,6 +22,23 @@ export function PresetOrCustomField({
   const matchesPreset = presets.includes(value);
   const [forceCustom, setForceCustom] = useState(!matchesPreset);
   const showCustom = forceCustom || !matchesPreset;
+  const [customDraft, setCustomDraft] = useState(String(value));
+
+  useEffect(() => {
+    if (showCustom) {
+      setCustomDraft(String(value));
+    }
+  }, [value, showCustom]);
+
+  const commitCustomDraft = () => {
+    const parsed = Number(customDraft);
+    if (customDraft.trim() === "" || !Number.isFinite(parsed)) {
+      setCustomDraft(String(value));
+      return;
+    }
+    onChange(parsed);
+    setCustomDraft(String(parsed));
+  };
 
   return (
     <div className={`space-y-1 ${disabled ? "opacity-50" : ""}`}>
@@ -35,6 +52,7 @@ export function PresetOrCustomField({
         onChange={(e) => {
           if (e.target.value === "custom") {
             setForceCustom(true);
+            setCustomDraft(String(value));
             return;
           }
           setForceCustom(false);
@@ -53,10 +71,20 @@ export function PresetOrCustomField({
       {showCustom && (
         <input
           type="number"
-          min="0"
-          value={value}
+          value={customDraft}
           disabled={disabled}
-          onChange={(e) => onChange(Number(e.target.value) || 0)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setCustomDraft(next);
+            if (next === "" || next === "-") {
+              return;
+            }
+            const parsed = Number(next);
+            if (Number.isFinite(parsed)) {
+              onChange(parsed);
+            }
+          }}
+          onBlur={commitCustomDraft}
           className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
           placeholder="Custom value"
         />
