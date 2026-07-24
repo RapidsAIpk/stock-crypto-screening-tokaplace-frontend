@@ -76,6 +76,7 @@ export function PresetOrCustomField({
       {showCustom && (
         <input
           type="number"
+          min="0"
           value={rawText}
           disabled={disabled}
           onChange={(e) => setRawText(e.target.value)}
