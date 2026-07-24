@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface PresetOrCustomProps {
   label: string;
@@ -22,6 +22,29 @@ export function PresetOrCustomField({
   const matchesPreset = presets.includes(value);
   const [forceCustom, setForceCustom] = useState(!matchesPreset);
   const showCustom = forceCustom || !matchesPreset;
+
+  // Raw text typed into the custom input, tracked separately from the numeric
+  // `value` prop. Previously onChange called `Number(e.target.value) || 0` on
+  // every keystroke, which - combined with callers clamping to their own
+  // minimum, e.g. `Math.max(1, v)` - made the field snap back to that floor
+  // the instant it was cleared, before a replacement digit could be typed.
+  // Typing is now free; the value only commits on blur, same as before
+  // (empty still resolves through 0, so each caller's own `Math.max` still
+  // lands it on the right floor - it just doesn't fire on every keystroke).
+  const [rawText, setRawText] = useState(String(value));
+
+  useEffect(() => {
+    setRawText(String(value));
+  }, [value]);
+
+  const commitRawText = () => {
+    const parsed = rawText.trim() === "" ? 0 : Number(rawText);
+    if (Number.isFinite(parsed)) {
+      onChange(parsed);
+    } else {
+      setRawText(String(value));
+    }
+  };
 
   return (
     <div className={`space-y-1 ${disabled ? "opacity-50" : ""}`}>
@@ -53,10 +76,10 @@ export function PresetOrCustomField({
       {showCustom && (
         <input
           type="number"
-          min="0"
-          value={value}
+          value={rawText}
           disabled={disabled}
-          onChange={(e) => onChange(Number(e.target.value) || 0)}
+          onChange={(e) => setRawText(e.target.value)}
+          onBlur={commitRawText}
           className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
           placeholder="Custom value"
         />
