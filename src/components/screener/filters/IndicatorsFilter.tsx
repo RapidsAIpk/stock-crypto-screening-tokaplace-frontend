@@ -6,8 +6,10 @@ import {
   DEFAULT_TREND_AREA_RULE,
   INDICATOR_DEFINITIONS,
   TREND_CHANNEL_AREAS,
+  TREND_CHANNEL_DISABLED,
   TREND_CHANNEL_LINE_ACTIONS,
   TREND_CHANNEL_ZONE_ACTIONS,
+  isTrendAreaRuleDisabled,
   getDefaultIndicatorConfig,
   trendyAdxConditionsForMode,
 } from "@/types/screener";
@@ -73,6 +75,10 @@ function isTrendZoneArea(area?: string): boolean {
 }
 
 function trendActionsForArea(area?: string): readonly string[] {
+  if (area === TREND_CHANNEL_DISABLED) {
+    return [TREND_CHANNEL_DISABLED];
+  }
+
   return isTrendZoneArea(area)
     ? TREND_CHANNEL_ZONE_ACTIONS
     : TREND_CHANNEL_LINE_ACTIONS;
@@ -91,6 +97,10 @@ function formatOptionLabel(fieldKey: string, option: string): string {
 
   if (option === "role_reversal") {
     return "role reversal";
+  }
+
+  if (option === TREND_CHANNEL_DISABLED) {
+    return "Disabled";
   }
 
   return option.replace(/_/g, " ");
@@ -191,6 +201,13 @@ export function IndicatorsFilter({
       if (c.lin_reg === false) parts.push("raw candles");
     }
     if (c.multiplier) parts.push(`x${c.multiplier}`);
+    if (ind.name === "trend") {
+      const areas = (c.areas as AreaRule[] | undefined) ?? [];
+      const activeAreas = areas.filter((area) => !isTrendAreaRuleDisabled(area));
+      if (!activeAreas.length && areas.length) {
+        parts.push("area rules disabled");
+      }
+    }
     return parts.length > 0 ? parts.join(" · ") : "Using defaults";
   };
 
@@ -428,19 +445,28 @@ export function IndicatorsFilter({
                                       value={area.area ?? "top_line"}
                                       onChange={(e) => {
                                         const nextArea = e.target.value;
+                                        if (nextArea === TREND_CHANNEL_DISABLED) {
+                                          updateAreaRulePatch(idx, areaIdx, {
+                                            area: TREND_CHANNEL_DISABLED,
+                                            action: TREND_CHANNEL_DISABLED,
+                                          });
+                                          return;
+                                        }
                                         const nextActionOptions = trendActionsForArea(nextArea);
                                         const nextAction = nextActionOptions.includes(area.action ?? "")
                                           ? area.action ?? defaultTrendAction(nextArea)
                                           : defaultTrendAction(nextArea);
                                         updateAreaRulePatch(idx, areaIdx, {
                                           area: nextArea,
-                                          action: nextAction,
+                                          action: nextAction === TREND_CHANNEL_DISABLED
+                                            ? defaultTrendAction(nextArea)
+                                            : nextAction,
                                         });
                                       }}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                     >
                                       {TREND_CHANNEL_AREAS.map((option) => (
-                                        <option key={option} value={option}>{option.replace(/_/g, " ")}</option>
+                                        <option key={option} value={option}>{formatOptionLabel("area", option)}</option>
                                       ))}
                                     </select>
                                   </div>
@@ -448,15 +474,27 @@ export function IndicatorsFilter({
                                     <div className="text-[10px] text-muted-foreground">Action</div>
                                     <select
                                       value={area.action ?? defaultTrendAction(area.area)}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "action", e.target.value)}
+                                      onChange={(e) => {
+                                        const nextAction = e.target.value;
+                                        if (nextAction === TREND_CHANNEL_DISABLED) {
+                                          updateAreaRulePatch(idx, areaIdx, { action: TREND_CHANNEL_DISABLED });
+                                          return;
+                                        }
+                                        updateAreaRulePatch(idx, areaIdx, {
+                                          action: nextAction,
+                                          area: area.area === TREND_CHANNEL_DISABLED
+                                            ? "top_line"
+                                            : area.area,
+                                        });
+                                      }}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                     >
                                       {trendActionsForArea(area.area).map((option) => (
-                                        <option key={option} value={option}>{option.replace(/_/g, " ")}</option>
+                                        <option key={option} value={option}>{formatOptionLabel("action", option)}</option>
                                       ))}
                                     </select>
                                   </div>
-                                  {(area.action === "touched" || area.action === "breach") && (
+                                  {!isTrendAreaRuleDisabled(area) && (area.action === "touched" || area.action === "breach") && (
                                     <div className="space-y-1">
                                       <div className="text-[10px] text-muted-foreground">
                                         {area.action === "breach" ? "Breach Type" : "Touch Type"}
@@ -476,7 +514,7 @@ export function IndicatorsFilter({
                                       </select>
                                     </div>
                                   )}
-                                  {area.action === "breach" && (
+                                  {!isTrendAreaRuleDisabled(area) && area.action === "breach" && (
                                     <div className="space-y-1">
                                       <div className="text-[10px] text-muted-foreground">Breach Direction</div>
                                       <select
@@ -490,6 +528,8 @@ export function IndicatorsFilter({
                                       </select>
                                     </div>
                                   )}
+                                  {!isTrendAreaRuleDisabled(area) && (
+                                  <>
                                   <div className="space-y-1">
                                     <div className="text-[10px] text-muted-foreground">Window</div>
                                     <input
@@ -567,6 +607,13 @@ export function IndicatorsFilter({
                                       })}
                                     </div>
                                   </div>
+                                  </>
+                                  )}
+                                  {isTrendAreaRuleDisabled(area) && (
+                                    <div className="col-span-2 rounded border border-dashed border-border/70 px-2 py-2 text-[10px] text-muted-foreground">
+                                      This area rule is disabled and will be skipped during screening.
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ))}

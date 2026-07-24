@@ -24,6 +24,7 @@ import type {
 import { DEFAULT_DEAD_ASSETS_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
 import { normalizeConfluenceConfig, normalizeIndicatorConfig } from "@/types/screener";
 import type { FilterSnapshot } from "@/hooks/useUserSettings";
+import { useScanProgress } from "@/hooks/useScanProgress";
 import { appEnv } from "@/config/env";
 
 const API_BASE = appEnv.apiBase;
@@ -147,6 +148,11 @@ function cryptoExchangeNames(options: CryptoExchangeOption[]): string[] {
 }
 
 export function useScreener() {
+  const {
+    progress: scanProgress,
+    beginScan,
+    endScan,
+  } = useScanProgress();
 
   // -------------------------------------------------------
   // FILTER STATE
@@ -529,7 +535,8 @@ export function useScreener() {
 
   const callAPI = async <T>(
     endpoint: string,
-    body: ScreenerRequest | ScreenerDetailRequest
+    body: ScreenerRequest | ScreenerDetailRequest,
+    options?: { scanId?: string },
   ): Promise<T> => {
     const base = runtimeApiBase();
     const timeoutMs = runtimeTimeoutMs();
@@ -542,11 +549,16 @@ export function useScreener() {
         const controller = new AbortController();
         timer = setTimeout(() => controller.abort(), timeoutMs);
 
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (options?.scanId) {
+          headers["X-Scan-Id"] = options.scanId;
+        }
+
         const res = await fetch(`${base}/${endpoint}`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers,
           body: JSON.stringify(body),
           signal: controller.signal,
         });
@@ -635,13 +647,14 @@ export function useScreener() {
 
     setLoading(true);
     setErrorMessage("");
+    const scanId = await beginScan();
 
     try {
 
       const body = buildRequest();
       body.timeframe_mode = "single";
 
-      const data = await callAPI<{ results?: ScreenerResult[] }>("run", body);
+      const data = await callAPI<{ results?: ScreenerResult[] }>("run", body, { scanId });
 
       setResults(data.results || []);
       setLastResultContext({
@@ -659,11 +672,12 @@ export function useScreener() {
 
     } finally {
 
+      endScan();
       setLoading(false);
 
     }
 
-  }, [buildRequest, singleTimeframe]);
+  }, [beginScan, buildRequest, endScan, singleTimeframe]);
 
 
   // -------------------------------------------------------
@@ -675,12 +689,13 @@ export function useScreener() {
     setLoading(true);
     setErrorMessage("");
     setEntryCompleted(false);
+    const scanId = await beginScan();
 
     try {
       validateGateEntryTimeframes();
       const body = buildGateBody();
 
-      const data = await callAPI<{ results?: ScreenerResult[]; gate_session_id?: string | null }>("run-gate", body);
+      const data = await callAPI<{ results?: ScreenerResult[]; gate_session_id?: string | null }>("run-gate", body, { scanId });
 
       const count = data.results?.length || 0;
       const sessionId = data.gate_session_id ?? null;
@@ -704,11 +719,12 @@ export function useScreener() {
 
     } finally {
 
+      endScan();
       setLoading(false);
 
     }
 
-  }, [buildGateBody, callAPI, gateTimeframe, validateGateEntryTimeframes]);
+  }, [beginScan, buildGateBody, endScan, gateTimeframe, validateGateEntryTimeframes]);
 
 
   // -------------------------------------------------------
@@ -724,11 +740,12 @@ export function useScreener() {
 
     setLoading(true);
     setErrorMessage("");
+    const scanId = await beginScan();
 
     try {
       validateGateEntryTimeframes();
       const body = buildEntryBody(gateSessionId);
-      const data = await callAPI<{ results?: ScreenerResult[] }>("run-entry", body);
+      const data = await callAPI<{ results?: ScreenerResult[] }>("run-entry", body, { scanId });
 
       const count = data.results?.length || 0;
 
@@ -750,15 +767,17 @@ export function useScreener() {
 
     } finally {
 
+      endScan();
       setLoading(false);
 
     }
 
   }, [
+    beginScan,
+    endScan,
     gateCompleted,
     gateSessionId,
     buildEntryBody,
-    callAPI,
     entryTimeframe,
     validateGateEntryTimeframes,
   ]);
@@ -767,12 +786,13 @@ export function useScreener() {
     setLoading(true);
     setErrorMessage("");
     setEntryCompleted(false);
+    const scanId = await beginScan();
 
     try {
       validateGateEntryTimeframes();
 
       const gateBody = buildGateBody();
-      const gateData = await callAPI<{ results?: ScreenerResult[]; gate_session_id?: string | null }>("run-gate", gateBody);
+      const gateData = await callAPI<{ results?: ScreenerResult[]; gate_session_id?: string | null }>("run-gate", gateBody, { scanId });
       const gateResults = gateData.results || [];
       const gateSession = gateData.gate_session_id ?? null;
       const gateResultsCount = gateResults.length;
@@ -795,7 +815,7 @@ export function useScreener() {
       }
 
       const entryBody = buildEntryBody(gateSession);
-      const entryData = await callAPI<{ results?: ScreenerResult[] }>("run-entry", entryBody);
+      const entryData = await callAPI<{ results?: ScreenerResult[] }>("run-entry", entryBody, { scanId });
       const entryResults = entryData.results || [];
       const entryResultsCount = entryResults.length;
 
@@ -811,12 +831,14 @@ export function useScreener() {
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : "Gate-entry scan failed");
     } finally {
+      endScan();
       setLoading(false);
     }
   }, [
+    beginScan,
     buildEntryBody,
     buildGateBody,
-    callAPI,
+    endScan,
     entryTimeframe,
     validateGateEntryTimeframes,
   ]);
@@ -1022,6 +1044,7 @@ export function useScreener() {
 
     results,
     loading,
+    scanProgress,
 
     gateCompleted,
     gateCount,

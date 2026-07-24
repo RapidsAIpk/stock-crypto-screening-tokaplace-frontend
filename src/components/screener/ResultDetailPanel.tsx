@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 import type { FilterDetail, IndicatorDetail, ScreenerResult, ScreenerResultDetail } from "@/types/screener";
 import { getIndicatorColor } from "./indicatorColors";
+import { CopyResultDetailButton } from "./dev/CopyResultDetailButton";
 import { appEnv } from "@/config/env";
 import { useUserSettings } from "@/hooks/useUserSettings";
-import { formatDateValue, formatUnixSeconds } from "@/lib/dates";
+import { describeLatestCandleConsidered, formatDateValue, formatUnixSeconds } from "@/lib/dates";
 import { ResultDetailChart } from "./ResultDetailChart";
 
 interface Props {
@@ -336,9 +337,26 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
   const { settings } = useUserSettings();
   const timeZone = settings.timezone || "UTC";
   const active = detail ?? result;
-  const lastCandle = formatUnixSeconds(active.last_candle_time ?? null, timeZone);
-  const reportDate = formatDateValue(active.report_date, timeZone);
   const marketData = detail?.market_data;
+  const lastCandleRecord = marketData?.last_candle;
+  const lastCandleIsClosed = lastCandleRecord
+    && typeof lastCandleRecord === "object"
+    && "is_closed" in lastCandleRecord
+    ? lastCandleRecord.is_closed !== false
+    : null;
+  const latestCandleConsidered = describeLatestCandleConsidered(active.last_candle_time ?? null, {
+    timeZone,
+    isClosed: lastCandleIsClosed,
+  });
+  const latestCandleHint = [
+    latestCandleConsidered.timeLabel,
+    latestCandleConsidered.utcLabel !== latestCandleConsidered.timeLabel
+      ? `UTC ${latestCandleConsidered.utcLabel}`
+      : null,
+    latestCandleConsidered.statusLabel,
+    "Compare this candle open time on TradingView",
+  ].filter(Boolean).join(" • ");
+  const reportDate = formatDateValue(active.report_date, timeZone);
   const indicatorDetails = detail?.indicator_details || [];
   const filterDetails = detail?.filter_details || [];
   const passedIndicators = indicatorDetails.filter((item) => item.passed);
@@ -363,9 +381,19 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
           </div>
           <div className="text-sm text-muted-foreground">{active.name || "Name unavailable"}</div>
         </div>
-        <button onClick={onClose} className="rounded-full border border-border/70 p-2 text-muted-foreground transition-colors hover:text-foreground">
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-start gap-2">
+          {showTechnical ? (
+            <CopyResultDetailButton
+              result={result}
+              detail={detail}
+              loading={loading}
+              error={error}
+            />
+          ) : null}
+          <button onClick={onClose} className="rounded-full border border-border/70 p-2 text-muted-foreground transition-colors hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-border/50 bg-background/25 px-4 py-3 text-xs leading-5 text-muted-foreground">
@@ -386,9 +414,9 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
           value={`${active.data_source}${active.exchange ? ` • ${active.exchange}` : ""}`}
         />
         <MetaCard
-          label="Last completed candle"
-          value={lastCandle}
-          hint="Open this date/time on TradingView"
+          label="Latest candle considered"
+          value={latestCandleConsidered.dateLabel}
+          hint={latestCandleHint}
         />
       </div>
 
