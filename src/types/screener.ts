@@ -397,6 +397,7 @@ export const INDICATOR_CATEGORY_MAP: Record<IndicatorName, IndicatorCategory> = 
 
 export type IndicatorFieldType =
   | "number"
+  | "text"
   | "select"
   | "multi-select"
   | "boolean"
@@ -408,6 +409,10 @@ export interface IndicatorFieldDefinition {
   label: string;
   type: IndicatorFieldType;
   options?: readonly string[];
+  min?: number;
+  max?: number;
+  step?: number;
+  section?: string;
 }
 
 export interface IndicatorDefinition {
@@ -1023,25 +1028,75 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
   {
     name: "volume",
     fields: [
-      { key: "length", label: "Average Length", type: "number" },
-      { key: "multiplier", label: "Spike Strength", type: "number" },
-      { key: "tolerance_pct", label: "Tolerance %", type: "number" },
+      { key: "vol_x", label: "Volume Multiplier", type: "number", min: 0, step: 0.1 },
+      { key: "vol_ma", label: "Volume SMA Length", type: "number", min: 1 },
+      { key: "only_valid_hl", label: "Only Use Valid Highs & Lows", type: "boolean" },
+      { key: "only_hammers_shooters", label: "Only Use Hammers & Shooters", type: "boolean" },
+      { key: "only_same_color", label: "Only Use Same-Close Volume Spikes", type: "boolean" },
+      { key: "session", label: "Session Time", type: "text" },
     ],
   },
   {
     name: "relative_volume",
     fields: [
-      { key: "length", label: "Average Length", type: "number" },
+      { key: "length", label: "Lookback bars for Average", type: "number" },
+      { key: "lsma_length", label: "LSMA Length", type: "number" },
       { key: "min_ratio", label: "Minimum RVOL", type: "number" },
+      {
+        key: "rule",
+        label: "Signal",
+        type: "select",
+        options: [
+          "above",
+          "below",
+          "between",
+          "crossed_above",
+          "crossed_below",
+          "highest",
+          "volume_alert",
+          "increased_volume",
+          "anomaly",
+          "entry",
+        ],
+      },
+      { key: "window", label: "Signal Window", type: "number" },
+      { key: "vol_alert", label: "Alert when volume reaches", type: "number" },
+      { key: "show_lsma_21", label: "Show LSMA 21 Entry Points", type: "boolean" },
+      { key: "show_lsma_6", label: "Show LSMA 6 Entry Points", type: "boolean" },
+      { key: "show_anomalies", label: "Show Anomalies", type: "boolean" },
+      { key: "max_ratio", label: "Maximum RVOL", type: "number" },
       { key: "tolerance_pct", label: "Tolerance %", type: "number" },
     ],
   },
   {
     name: "current_volume",
     fields: [
-      { key: "min_value", label: "Minimum Volume", type: "number" },
-      { key: "max_value", label: "Maximum Volume", type: "number" },
-      { key: "tolerance_pct", label: "Tolerance %", type: "number" },
+      {
+        key: "enable_percentage_on_chart",
+        label: "Enable/Disable Showing RVOL % On Chart",
+        type: "boolean",
+      },
+      { key: "atr_length", label: "ATR Period", type: "number", min: 1 },
+      {
+        key: "smoothing",
+        label: "Smoothing",
+        type: "select",
+        options: ["RMA", "SMA", "EMA", "WMA"],
+      },
+      {
+        key: "atr_multiplier",
+        label: "ATR Multiplier",
+        type: "number",
+        min: 0.01,
+        max: 100,
+        step: 0.05,
+      },
+      {
+        key: "avg_count",
+        label: "Number Of Bars Used For Averaging",
+        type: "number",
+        min: 1,
+      },
     ],
   },
   {
@@ -1063,10 +1118,66 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
   {
     name: "volatility",
     fields: [
-      { key: "length", label: "Lookback", type: "number" },
-      { key: "min_pct", label: "Minimum Volatility %", type: "number" },
-      { key: "max_pct", label: "Maximum Volatility %", type: "number" },
-      { key: "tolerance_pct", label: "Tolerance %", type: "number" },
+      {
+        key: "source",
+        label: "Source",
+        type: "select",
+        options: ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4", "hlcc4"],
+      },
+      { key: "length", label: "Length", type: "number", min: 2 },
+      { key: "atr_factor", label: "ATR factor", type: "number", min: 0.25, step: 0.25 },
+      {
+        key: "htf_selection",
+        label: "Higher-timeframe selection",
+        type: "select",
+        options: [
+          "None",
+          "Discrete Steps (60min, 1D, 3D, 1W, 1M, 12M)",
+          "Multiple Of Current TF",
+          "Fixed TF",
+        ],
+      },
+      { key: "htf_multiple", label: "Multiple of current TF", type: "number", min: 1 },
+      {
+        key: "fixed_timeframe",
+        label: "Fixed TF",
+        type: "select",
+        options: ["1m", "5m", "15m", "30m", "60", "1h", "4h", "1D", "3D", "1W", "1M", "12M"],
+      },
+      { key: "detect_breaches", label: "Detect breaches by chart bars", type: "boolean" },
+      { key: "repainting_htf", label: "Repainting HTF", type: "boolean" },
+      {
+        key: "rule",
+        label: "Signal",
+        type: "select",
+        options: [
+          "threshold",
+          "trend_reversal",
+          "change_to_uptrend",
+          "change_to_downtrend",
+          "uptrend",
+          "downtrend",
+          "price_cross_stop",
+          "volatility_expansion",
+          "volatility_contraction",
+          "early_breach_uptrend",
+          "early_breach_downtrend",
+          "selected_alerts",
+        ],
+      },
+      { key: "window", label: "Signal Window", type: "number", min: 1 },
+      { key: "trend_reversal_alert", label: "Trend reversal", type: "boolean" },
+      { key: "change_to_uptrend_alert", label: "Change to uptrend", type: "boolean" },
+      { key: "change_to_downtrend_alert", label: "Change to downtrend", type: "boolean" },
+      { key: "chart_breach_downtrend_alert", label: "Chart breach of HTF downtrend", type: "boolean" },
+      { key: "chart_breach_uptrend_alert", label: "Chart breach of HTF uptrend", type: "boolean" },
+      { key: "delay_minutes", label: "Delay in minutes", type: "number", min: 0, step: 0.5 },
+      {
+        key: "alert_frequency",
+        label: "Alert frequency",
+        type: "select",
+        options: ["once_per_bar", "once_per_bar_close"],
+      },
     ],
   },
 ];
@@ -1209,18 +1320,35 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     tolerance_pct: 0,
   },
   volume: {
-    length: 20,
-    multiplier: 2,
+    vol_x: 1.5,
+    vol_ma: 100,
+    only_valid_hl: true,
+    only_hammers_shooters: true,
+    only_same_color: false,
+    session: "0000-0000",
+    rule: "either",
+    window: 1,
     tolerance_pct: 0,
   },
   relative_volume: {
-    length: 20,
+    length: 30,
+    lsma_length: 50,
     min_ratio: 1.5,
+    max_ratio: null,
+    rule: "above",
+    window: 1,
+    vol_alert: 200000000,
+    show_lsma_21: true,
+    show_lsma_6: true,
+    show_anomalies: true,
     tolerance_pct: 0,
   },
   current_volume: {
-    min_value: 0,
-    max_value: null,
+    enable_percentage_on_chart: true,
+    atr_length: 14,
+    smoothing: "RMA",
+    atr_multiplier: 0.5,
+    avg_count: 30,
     tolerance_pct: 0,
   },
   float: {
@@ -1234,10 +1362,24 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     tolerance_pct: 0,
   },
   volatility: {
+    mode: "vstop",
+    source: "close",
     length: 20,
-    min_pct: 0,
-    max_pct: null,
-    tolerance_pct: 0,
+    atr_factor: 2,
+    htf_selection: "Multiple Of Current TF",
+    htf_multiple: 3,
+    fixed_timeframe: "1D",
+    detect_breaches: true,
+    repainting_htf: false,
+    rule: "threshold",
+    window: 1,
+    trend_reversal_alert: false,
+    change_to_uptrend_alert: false,
+    change_to_downtrend_alert: false,
+    chart_breach_downtrend_alert: false,
+    chart_breach_uptrend_alert: false,
+    delay_minutes: 0,
+    alert_frequency: "once_per_bar",
   },
 };
 
@@ -1323,15 +1465,57 @@ export function getDefaultConfluenceConfig(): typeof CONFLUENCE_DEFAULT_CONFIG {
   });
 }
 
+export function normalizeDeadAssetsFilter(
+  filter: DeadAssetsFilter | null,
+): DeadAssetsFilter | null {
+  if (!filter) {
+    return null;
+  }
+
+  const validTypes = new Set<DeadTrendType>(ALL_DEAD_TREND_TYPES);
+  const selected = new Set(
+    (filter.dead_trend_types ?? []).filter((type): type is DeadTrendType =>
+      validTypes.has(type),
+    ),
+  );
+
+  // Rebuild from the canonical order instead of the user's click order, so
+  // the outgoing request is always deterministic and de-duplicated -
+  // without ever mutating the array the caller passed in.
+  return {
+    ...filter,
+    dead_trend_types: ALL_DEAD_TREND_TYPES.filter((type) => selected.has(type)),
+  };
+}
+
 export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorConfig {
   const defaults = getDefaultIndicatorConfig(indicator.name);
+  const rawConfig = indicator.config ?? {};
+  const config = {
+    ...defaults,
+    ...rawConfig,
+  };
+
+  if (indicator.name === "volume") {
+    if (rawConfig.vol_x == null && rawConfig.multiplier != null) {
+      config.vol_x = config.multiplier;
+    }
+    if (rawConfig.vol_ma == null && rawConfig.length != null) {
+      config.vol_ma = config.length;
+    }
+
+    delete config.length;
+    delete config.multiplier;
+    delete config.volume_length;
+    delete config.volume_threshold;
+    delete config.min_ratio;
+    delete config.min_volume;
+    delete config.max_volume;
+  }
 
   return {
     ...indicator,
-    config: {
-      ...defaults,
-      ...(indicator.config ?? {}),
-    },
+    config,
   };
 }
 
