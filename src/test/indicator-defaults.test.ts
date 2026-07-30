@@ -155,6 +155,226 @@ describe("indicator defaults", () => {
     });
   });
 
+  it("uses TradingView WT_CROSS_LB defaults for WaveTrend", () => {
+    expect(getDefaultIndicatorConfig("wavetrend")).toEqual({
+      mode: "wt_cross_lb",
+      channel_length: 10,
+      average_length: 21,
+      signal_length: 4,
+      overbought_level_1: 60,
+      overbought_level_2: 53,
+      oversold_level_1: -60,
+      oversold_level_2: -53,
+      condition: "cross_any",
+      zone: "any",
+      window: 1,
+      tolerance_pct: 0,
+      confirmation: false,
+    });
+  });
+
+  it("shows WaveTrend WT_CROSS_LB fields and hides legacy threshold fields", () => {
+    const fields = INDICATOR_DEFINITIONS.find((item) => item.name === "wavetrend")?.fields ?? [];
+    const keys = fields.map((field) => field.key);
+
+    expect(keys).toEqual([
+      "channel_length",
+      "average_length",
+      "overbought_level_1",
+      "overbought_level_2",
+      "oversold_level_1",
+      "oversold_level_2",
+      "signal_length",
+      "condition",
+      "zone",
+      "window",
+      "tolerance_pct",
+      "confirmation",
+      "confirmation_types",
+      "confirmation_patterns",
+    ]);
+    expect(keys).not.toContain("threshold");
+    expect(keys).not.toContain("direction");
+    expect(fields.find((field) => field.key === "signal_length")?.section).toBe("Advanced Screening");
+    expect(fields.find((field) => field.key === "condition")?.label).toBe("Condition");
+    expect(fields.find((field) => field.key === "window")?.label).toBe("Window");
+  });
+
+  it("sends the exact default WaveTrend WT_CROSS_LB config in the built request", async () => {
+    const { result } = renderHook(() => useScreener());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      result.current.setIndicators([
+        {
+          name: "wavetrend",
+          timeframe: "single",
+          config: getDefaultIndicatorConfig("wavetrend"),
+        },
+      ]);
+    });
+
+    expect(result.current.buildRequest().indicators[0]).toEqual({
+      name: "wavetrend",
+      timeframe: "single",
+      config: {
+        mode: "wt_cross_lb",
+        channel_length: 10,
+        average_length: 21,
+        signal_length: 4,
+        overbought_level_1: 60,
+        overbought_level_2: 53,
+        oversold_level_1: -60,
+        oversold_level_2: -53,
+        condition: "cross_any",
+        zone: "any",
+        window: 1,
+        tolerance_pct: 0,
+        confirmation: false,
+      },
+    });
+  });
+
+  it("normalizes old WaveTrend direction configs into WT_CROSS_LB condition", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "wavetrend",
+      timeframe: "single",
+      config: {
+        threshold: 35,
+        zone: "oversold",
+        direction: "crossed_up",
+        tolerance_pct: 0.2,
+      },
+    });
+
+    expect(normalized.config).toEqual({
+      mode: "wt_cross_lb",
+      channel_length: 10,
+      average_length: 21,
+      signal_length: 4,
+      overbought_level_1: 60,
+      overbought_level_2: 53,
+      oversold_level_1: -60,
+      oversold_level_2: -53,
+      condition: "cross_up",
+      zone: "oversold",
+      window: 1,
+      tolerance_pct: 0.2,
+      confirmation: false,
+    });
+  });
+
+  it("uses TradingView Trendy ADX defaults", () => {
+    expect(getDefaultIndicatorConfig("adx")).toEqual({
+      length: 11,
+      threshold: 20,
+      show_background_colors: false,
+      use_dark_theme: false,
+      top_level: 19,
+      rising_level: 10,
+      up_level: 4,
+      down_level: -4,
+      falling_level: -10,
+      bottom_level: -19,
+      rule: "adx_above",
+      window: 1,
+      min_history: 200,
+    });
+  });
+
+  it("shows Trendy ADX TradingView fields before Advanced Screening", () => {
+    const fields = INDICATOR_DEFINITIONS.find((item) => item.name === "adx")?.fields ?? [];
+    const keys = fields.map((field) => field.key);
+
+    expect(keys).toEqual([
+      "length",
+      "threshold",
+      "show_background_colors",
+      "use_dark_theme",
+      "top_level",
+      "rising_level",
+      "up_level",
+      "down_level",
+      "falling_level",
+      "bottom_level",
+      "rule",
+      "window",
+      "min_history",
+      "mode",
+      "conditions",
+    ]);
+    expect(fields.find((field) => field.key === "threshold")?.label).toBe("Threshold");
+    expect(fields.find((field) => field.key === "top_level")?.label).toBe("Top Level");
+    expect(fields.find((field) => field.key === "rising_level")?.label).toBe("Rising Level");
+    expect(fields.find((field) => field.key === "up_level")?.label).toBe("Up Level");
+    expect(fields.find((field) => field.key === "down_level")?.label).toBe("Down Level");
+    expect(fields.find((field) => field.key === "falling_level")?.label).toBe("Falling Level");
+    expect(fields.find((field) => field.key === "bottom_level")?.label).toBe("Bottom Level");
+    expect(fields.find((field) => field.key === "rule")?.label).toBe("Screening Rule");
+    expect(fields.find((field) => field.key === "rule")?.section).toBe("Advanced Screening");
+    expect(fields.find((field) => field.key === "min_history")?.section).toBe("Advanced Screening");
+    expect(fields.find((field) => field.key === "mode")?.section).toBe("Advanced Screening");
+    expect(fields.find((field) => field.key === "conditions")?.section).toBe("Advanced Screening");
+  });
+
+  it("sends the exact default Trendy ADX config in the built request", async () => {
+    const { result } = renderHook(() => useScreener());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      result.current.setIndicators([
+        {
+          name: "adx",
+          timeframe: "single",
+          config: getDefaultIndicatorConfig("adx"),
+        },
+      ]);
+    });
+
+    expect(result.current.buildRequest().indicators[0]).toEqual({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        length: 11,
+        threshold: 20,
+        show_background_colors: false,
+        use_dark_theme: false,
+        top_level: 19,
+        rising_level: 10,
+        up_level: 4,
+        down_level: -4,
+        falling_level: -10,
+        bottom_level: -19,
+        rule: "adx_above",
+        window: 1,
+        min_history: 200,
+      },
+    });
+  });
+
+  it("keeps advanced Trendy ADX mode and conditions when configured", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        conditions: [{ id: "adx_above_20" }],
+        rule: "buy_signal",
+        window: 2,
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      length: 11,
+      threshold: 20,
+      rule: "buy_signal",
+      window: 2,
+      min_history: 200,
+      mode: "bullish",
+      conditions: [{ id: "adx_above_20" }],
+    });
+  });
+
   it("uses TradingView-style defaults for Relative Volume", () => {
     expect(getDefaultIndicatorConfig("relative_volume")).toEqual({
       length: 30,

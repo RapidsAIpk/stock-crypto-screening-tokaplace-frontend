@@ -683,45 +683,64 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
   {
     name: "wavetrend",
     fields: [
-      { key: "channel_length", label: "Channel Length", type: "number" },
-      { key: "average_length", label: "Average Length", type: "number" },
-      { key: "signal_length", label: "Signal Length", type: "number" },
-          { key: "threshold", label: "Threshold", type: "number" },
+      { key: "channel_length", label: "Channel Length", type: "number", min: 1 },
+      { key: "average_length", label: "Average Length", type: "number", min: 1 },
+      { key: "overbought_level_1", label: "Over Bought Level 1", type: "number" },
+      { key: "overbought_level_2", label: "Over Bought Level 2", type: "number" },
+      { key: "oversold_level_1", label: "Over Sold Level 1", type: "number" },
+      { key: "oversold_level_2", label: "Over Sold Level 2", type: "number" },
       {
-        key: "zone",
-        label: "Zone",
-        type: "select",
-        options: ["oversold", "neutral", "overbought"],
+        key: "signal_length",
+        label: "Signal Length",
+        type: "number",
+        min: 1,
+        section: "Advanced Screening",
       },
       {
-        key: "direction",
-        label: "Momentum",
+        key: "condition",
+        label: "Condition",
         type: "select",
         options: [
+          "cross_any",
+          "cross_up",
+          "cross_down",
+          "oversold_cross_up",
+          "overbought_cross_down",
+          "oversold_watch",
+          "overbought_watch",
+          "turning_up_from_oversold",
+          "turning_down_from_overbought",
           "rising",
           "falling",
           "turning_up",
           "turning_down",
-          "crossed_up",
-          "crossed_down",
         ],
+        section: "Advanced Screening",
       },
-      { key: "tolerance_pct", label: "Tolerance %", type: "number" },
-      { key: "window", label: "How Many Candles", type: "number" },
-      { key: "confirmation", label: "Require Confirmation", type: "boolean" },
+      {
+        key: "zone",
+        label: "Zone",
+        type: "select",
+        options: ["any", "oversold", "oversold_level_1", "overbought", "overbought_level_1", "neutral"],
+        section: "Advanced Screening",
+      },
+      { key: "window", label: "Window", type: "number", min: 1, section: "Advanced Screening" },
+      { key: "tolerance_pct", label: "Tolerance %", type: "number", section: "Advanced Screening" },
+      { key: "confirmation", label: "Require Confirmation", type: "boolean", section: "Advanced Screening" },
       {
         key: "confirmation_types",
         label: "Confirmation Candle",
         type: "multi-select",
         options: CONFIRMATION_TYPES,
+        section: "Advanced Screening",
       },
       {
         key: "confirmation_patterns",
         label: "Pattern Confirmations",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
+        section: "Advanced Screening",
       },
-      { key: "confirmation_window", label: "Confirmation Window", type: "number" },
     ],
   },
   {
@@ -768,26 +787,56 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
   {
     name: "adx",
     fields: [
-      { key: "length", label: "Length", type: "number" },
-      { key: "threshold", label: "Threshold (ADX Trend Line)", type: "number" },
+      { key: "length", label: "Length", type: "number", min: 1 },
+      { key: "threshold", label: "Threshold", type: "number", step: 0.1 },
+      { key: "show_background_colors", label: "Show Background Colors?", type: "boolean" },
+      { key: "use_dark_theme", label: "Use Dark Theme for Black Backgrounds?", type: "boolean" },
+      { key: "top_level", label: "Top Level", type: "number" },
+      { key: "rising_level", label: "Rising Level", type: "number" },
+      { key: "up_level", label: "Up Level", type: "number" },
+      { key: "down_level", label: "Down Level", type: "number" },
+      { key: "falling_level", label: "Falling Level", type: "number" },
+      { key: "bottom_level", label: "Bottom Level", type: "number" },
+      {
+        key: "rule",
+        label: "Screening Rule",
+        type: "select",
+        options: [
+          "adx_above",
+          "adx_below",
+          "di_plus_above_di_minus",
+          "di_minus_above_di_plus",
+          "buy_signal",
+          "sell_signal",
+          "bullish_trend",
+          "bearish_trend",
+          "strong_trend",
+          "weak_trend",
+          "compression",
+          "trend_reversal",
+          "adx_rising",
+          "adx_falling",
+          "trend_strength_increasing",
+          "trend_strength_decreasing",
+        ],
+        section: "Advanced Screening",
+      },
+      { key: "window", label: "Window", type: "number", min: 1, section: "Advanced Screening" },
       {
         key: "min_history",
-        label: "History Depth (candles) — minimum 200 for TradingView accuracy; raise for extra margin",
+        label: "History Depth",
         type: "number",
+        min: 200,
+        section: "Advanced Screening",
       },
       {
         key: "mode",
         label: "Filter Type",
         type: "select",
         options: ["bullish", "bearish", "compression", "weak"],
+        section: "Advanced Screening",
       },
-      { key: "conditions", label: "Conditions", type: "condition-list" },
-      { key: "top_level", label: "Score: Top Level", type: "number" },
-      { key: "rising_level", label: "Score: Rising Level", type: "number" },
-      { key: "up_level", label: "Score: Up Level", type: "number" },
-      { key: "down_level", label: "Score: Down Level", type: "number" },
-      { key: "falling_level", label: "Score: Falling Level", type: "number" },
-      { key: "bottom_level", label: "Score: Bottom Level", type: "number" },
+      { key: "conditions", label: "Conditions", type: "condition-list", section: "Advanced Screening" },
     ],
   },
   {
@@ -1196,19 +1245,19 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     confirmation_window: null,
   },
   wavetrend: {
+    mode: "wt_cross_lb",
     channel_length: 10,
     average_length: 21,
     signal_length: 4,
-    threshold: 35,
-    zone: "oversold",
-    direction: "turning_up",
-    tolerance_pct: 0,
+    overbought_level_1: 60,
+    overbought_level_2: 53,
+    oversold_level_1: -60,
+    oversold_level_2: -53,
+    condition: "cross_any",
+    zone: "any",
     window: 1,
+    tolerance_pct: 0,
     confirmation: false,
-    confirmation_type: null,
-    confirmation_types: [],
-    confirmation_patterns: [],
-    confirmation_window: null,
   },
   aroon: {
     length: 14,
@@ -1226,14 +1275,16 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
   adx: {
     length: 11,
     threshold: 20,
-    mode: "bullish",
-    conditions: [{ id: "adx_above_20" }],
+    show_background_colors: false,
+    use_dark_theme: false,
     top_level: 19,
     rising_level: 10,
     up_level: 4,
     down_level: -4,
     falling_level: -10,
     bottom_level: -19,
+    rule: "adx_above",
+    window: 1,
     min_history: 200,
   },
   vlr: {
@@ -1511,6 +1562,27 @@ export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorC
     delete config.min_ratio;
     delete config.min_volume;
     delete config.max_volume;
+  }
+
+  if (indicator.name === "wavetrend") {
+    if (rawConfig.condition == null && rawConfig.direction != null) {
+      const direction = String(rawConfig.direction);
+      config.condition =
+        direction === "crossed_up"
+          ? "cross_up"
+          : direction === "crossed_down"
+            ? "cross_down"
+            : direction;
+    }
+
+    if (config.mode === "wt_cross_lb") {
+      delete config.threshold;
+      delete config.direction;
+      delete config.confirmation_type;
+      delete config.confirmation_types;
+      delete config.confirmation_patterns;
+      delete config.confirmation_window;
+    }
   }
 
   return {
