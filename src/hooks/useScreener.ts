@@ -22,7 +22,7 @@ import type {
   ScreenerResultExportEntry,
 } from "@/types/screener";
 import { DEFAULT_DEAD_ASSETS_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
-import { normalizeConfluenceConfig, normalizeIndicatorConfig } from "@/types/screener";
+import { normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeIndicatorConfig } from "@/types/screener";
 import type { FilterSnapshot } from "@/hooks/useUserSettings";
 import { useScanProgress } from "@/hooks/useScanProgress";
 import { appEnv } from "@/config/env";
@@ -145,6 +145,30 @@ function normalizeCryptoExchangeSelection(
 
 function cryptoExchangeNames(options: CryptoExchangeOption[]): string[] {
   return options.map((option) => option.exchange);
+}
+
+// Gate uses "primary", Entry uses "secondary" - an indicator left on
+// "single" while in gate_entry mode is invisible to both stages and gets
+// silently dropped from every request. Converting to "secondary" ("single"
+// only ever meant "the one active timeframe", which under gate_entry is the
+// lower/entry timeframe) keeps it evaluated instead of disappearing.
+function migrateIndicatorTimeframesForMode(
+  nextIndicators: IndicatorConfig[],
+  mode: TimeframeMode,
+): IndicatorConfig[] {
+  if (mode === "gate_entry") {
+    return nextIndicators.map((indicator) =>
+      indicator.timeframe === "single"
+        ? { ...indicator, timeframe: "secondary" }
+        : indicator,
+    );
+  }
+
+  return nextIndicators.map((indicator) =>
+    indicator.timeframe === "single"
+      ? indicator
+      : { ...indicator, timeframe: "single" },
+  );
 }
 
 export function useScreener() {
@@ -381,7 +405,7 @@ export function useScreener() {
           ? safeConfluence
           : null,
       price_range: priceRange,
-      dead_assets: deadAssets,
+      dead_assets: normalizeDeadAssetsFilter(deadAssets),
     };
   }
 
@@ -488,11 +512,22 @@ export function useScreener() {
     const normalizedPair = normalizeGateEntryPair(snap.gateTimeframe, snap.entryTimeframe);
     setGateTimeframe(normalizedPair.gate);
     setEntryTimeframe(normalizedPair.entry);
-    setIndicators(sanitizeIndicators(snap.indicators));
+    // Old gate-entry presets saved before this migration existed can still
+    // carry indicators stuck on timeframe "single" - migrate them here too,
+    // so loading a preset can't recreate the disappearing-indicator bug.
+    setIndicators(
+      sanitizeIndicators(
+        migrateIndicatorTimeframesForMode(snap.indicators, snap.timeframeMode),
+      ),
+    );
     setChannelRespect(snap.channelRespect);
     setConfluence(normalizeConfluenceConfig(snap.confluence));
     setPriceRange(snap.priceRange ?? null);
-    setDeadAssets(snap.deadAssets !== undefined ? snap.deadAssets : DEFAULT_DEAD_ASSETS_FILTER);
+    setDeadAssets(
+      normalizeDeadAssetsFilter(
+        snap.deadAssets !== undefined ? snap.deadAssets : DEFAULT_DEAD_ASSETS_FILTER,
+      ),
+    );
 
     resetGateEntry();
     setResults([]);
@@ -619,24 +654,40 @@ export function useScreener() {
     }
   }, [entryTimeframe, gateTimeframe]);
 
+  // Gate/Entry stage filtering below only keeps "primary"/"secondary"
+  // indicators - a stray "single" scope must never be silently dropped by
+  // that filter, so it's rejected here with a clear error instead.
+  const assertNoLeftoverSingleScopeIndicators = useCallback((body: ScreenerRequest) => {
+    const invalid = body.indicators.filter((indicator) => indicator.timeframe === "single");
+    if (invalid.length > 0) {
+      const names = invalid.map((indicator) => indicator.name).join(", ");
+      throw new Error(
+        `Gate-entry mode requires every indicator to be scoped to Gate or Entry. ` +
+        `Fix the timeframe scope for: ${names}.`
+      );
+    }
+  }, []);
+
   const buildGateBody = useCallback(() => {
     const body = buildRequest();
     body.timeframe_mode = "gate_entry";
+    assertNoLeftoverSingleScopeIndicators(body);
     body.indicators = body.indicators.filter(
       i => i.timeframe === "primary"
     );
     return body;
-  }, [buildRequest]);
+  }, [assertNoLeftoverSingleScopeIndicators, buildRequest]);
 
   const buildEntryBody = useCallback((sessionId: string) => {
     const body = buildRequest();
     body.timeframe_mode = "gate_entry";
+    assertNoLeftoverSingleScopeIndicators(body);
     body.indicators = body.indicators.filter(
       i => i.timeframe === "secondary"
     );
     body.gate_session_id = sessionId;
     return body;
-  }, [buildRequest]);
+  }, [assertNoLeftoverSingleScopeIndicators, buildRequest]);
 
 
   // -------------------------------------------------------
@@ -987,6 +1038,10 @@ export function useScreener() {
         setGateTimeframe(normalizedPair.gate);
         setEntryTimeframe(normalizedPair.entry);
       }
+      // Existing indicators must follow the mode switch instead of being
+      // silently dropped later: single -> secondary going into gate_entry,
+      // everything -> single going back to single mode.
+      setIndicators((prev) => migrateIndicatorTimeframesForMode(prev, v));
       resetGateEntry();
     },
 
@@ -1038,7 +1093,7 @@ export function useScreener() {
 
     deadAssets,
     setDeadAssets: (v: DeadAssetsFilter | null) => {
-      setDeadAssets(v);
+      setDeadAssets(normalizeDeadAssetsFilter(v));
       resetGateEntry();
     },
 

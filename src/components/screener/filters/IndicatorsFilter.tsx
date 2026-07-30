@@ -89,6 +89,21 @@ const FIELD_HELP_TEXT: Record<string, string> = {
   close_location: "Optional extra check on LinReg close. “Any” skips this check.",
 };
 
+const RELATIVE_VOLUME_FIELD_HELP_TEXT: Record<string, string> = {
+  length: "Must match TradingView's RVOL lookback input. Backend compares against the last completed candle, not the live candle.",
+  min_ratio: "Minimum RVOL compares volume / average(previous N volumes).",
+  window: "How many completed candles back the selected RVOL signal can occur.",
+  vol_alert: "Matches TradingView's Alert when volume reaches input.",
+};
+
+function fieldHelpText(indicatorName: IndicatorName, fieldKey: string): string | undefined {
+  if (indicatorName === "relative_volume") {
+    return RELATIVE_VOLUME_FIELD_HELP_TEXT[fieldKey] ?? FIELD_HELP_TEXT[fieldKey];
+  }
+
+  return FIELD_HELP_TEXT[fieldKey];
+}
+
 function timeframeLabel(tf: IndicatorTimeframe): string {
   if (tf === "primary") return "Gate";
   if (tf === "secondary") return "Entry";
@@ -214,24 +229,35 @@ export function IndicatorsFilter({
     onChange(updated);
   };
 
-  const isVlrFieldHidden = (ind: IndicatorConfig, fieldKey: string): boolean => {
-    if (ind.name !== "vlr") return false;
-    const direction = ind.config.direction;
-    if (fieldKey === "bullish_crossings") {
-      return !ind.config.crossing_confirmation || direction === "bearish";
+  const isFieldHidden = (ind: IndicatorConfig, fieldKey: string): boolean => {
+    if (ind.name === "vlr") {
+      const direction = ind.config.direction;
+      if (fieldKey === "bullish_crossings") {
+        return !ind.config.crossing_confirmation || direction === "bearish";
+      }
+      if (fieldKey === "bearish_crossings") {
+        return !ind.config.crossing_confirmation || direction === "bullish";
+      }
+      if (fieldKey === "crossing_sequence" || fieldKey === "multiple_crossing_requirement") {
+        return !ind.config.crossing_confirmation;
+      }
+      if (fieldKey === "volume_min_ratio") {
+        return !ind.config.volume_confirmation;
+      }
+      if (fieldKey === "candle_confirmation_patterns") {
+        return !ind.config.candle_confirmation;
+      }
     }
-    if (fieldKey === "bearish_crossings") {
-      return !ind.config.crossing_confirmation || direction === "bullish";
+
+    if (ind.name === "volatility") {
+      if (fieldKey === "htf_multiple") {
+        return ind.config.htf_selection !== "Multiple Of Current TF";
+      }
+      if (fieldKey === "fixed_timeframe") {
+        return ind.config.htf_selection !== "Fixed TF";
+      }
     }
-    if (fieldKey === "crossing_sequence" || fieldKey === "multiple_crossing_requirement") {
-      return !ind.config.crossing_confirmation;
-    }
-    if (fieldKey === "volume_min_ratio") {
-      return !ind.config.volume_confirmation;
-    }
-    if (fieldKey === "candle_confirmation_patterns") {
-      return !ind.config.candle_confirmation;
-    }
+
     return false;
   };
 
@@ -420,24 +446,49 @@ export function IndicatorsFilter({
               {!isCollapsed && def && (
                 <div className="px-3 pb-3 pt-1">
                   <div className="grid grid-cols-2 gap-2">
+<<<<<<< HEAD
                     {def.fields.map((field) => {
                       if (isIndicatorFieldHidden(ind, field.key)) {
                         return null;
                       }
                       const helpText = fieldHelpText(ind, field.key);
+=======
+                    {def.fields.map((field, fieldIndex) => {
+                      if (isFieldHidden(ind, field.key)) {
+                        return null;
+                      }
+                      const showSectionHeading =
+                        field.section
+                        && def.fields
+                          .slice(0, fieldIndex)
+                          .filter((previous) => !isFieldHidden(ind, previous.key))
+                          .every((previous) => previous.section !== field.section);
+>>>>>>> fd610e871af958947ea2d5fe864f56c2faaec095
                       return (
+                      <div key={field.key} className={field.section ? "contents" : "contents"}>
+                      {showSectionHeading && (
+                        <div className="col-span-2 mt-2 border-t border-border/60 pt-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          {field.section}
+                        </div>
+                      )}
                       <div
-                        key={field.key}
                         className={`space-y-1 ${field.type === "area-list" || field.type === "condition-list" ? "col-span-2" : ""}`}
                       >
                         <div className="text-[10px] text-muted-foreground">{field.label}</div>
+<<<<<<< HEAD
                         {helpText && (
                           <div className="text-[9px] text-muted-foreground/80">{helpText}</div>
+=======
+                        {fieldHelpText(ind.name, field.key) && (
+                          <div className="text-[9px] text-muted-foreground/80">{fieldHelpText(ind.name, field.key)}</div>
+>>>>>>> fd610e871af958947ea2d5fe864f56c2faaec095
                         )}
                         {field.type === "number" && (
                           <input
                             type="number"
-                            min={ind.name === "adx" && field.key === "min_history" ? 200 : undefined}
+                            min={field.min ?? (ind.name === "adx" && field.key === "min_history" ? 200 : undefined)}
+                            max={field.max}
+                            step={field.step}
                             value={(ind.config[field.key] as number) ?? ""}
                             onChange={(e) => updateConfig(idx, field.key, e.target.value ? Number(e.target.value) : null)}
                             onBlur={(e) => {
@@ -456,7 +507,24 @@ export function IndicatorsFilter({
                             className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                           />
                         )}
-                        {field.type === "boolean" && (
+                        {field.type === "text" && (
+                          <input
+                            type="text"
+                            value={(ind.config[field.key] as string) ?? ""}
+                            onChange={(e) => updateConfig(idx, field.key, e.target.value)}
+                            placeholder={field.key === "session" ? "0000-0000" : undefined}
+                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                          />
+                        )}
+                        {field.type === "boolean" && (ind.name === "volume" || ind.name === "current_volume" || ind.name === "volatility") && (
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ind.config[field.key])}
+                            onChange={(e) => updateConfig(idx, field.key, e.target.checked)}
+                            className="h-4 w-4 rounded border border-border bg-secondary text-primary"
+                          />
+                        )}
+                        {field.type === "boolean" && ind.name !== "volume" && ind.name !== "current_volume" && ind.name !== "volatility" && (
                           <button
                             onClick={() => updateConfig(idx, field.key, !ind.config[field.key])}
                             className={`h-7 w-7 rounded border transition-colors ${
@@ -846,6 +914,7 @@ export function IndicatorsFilter({
                             })}
                           </div>
                         )}
+                      </div>
                       </div>
                       );
                     })}
