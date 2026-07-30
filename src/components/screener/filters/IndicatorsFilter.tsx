@@ -96,9 +96,18 @@ const RELATIVE_VOLUME_FIELD_HELP_TEXT: Record<string, string> = {
   vol_alert: "Matches TradingView's Alert when volume reaches input.",
 };
 
+const ADX_FIELD_HELP_TEXT: Record<string, string> = {
+  window: "Number of completed candles to look back for signals.",
+  min_history: "Keep at least 200 candles for TradingView accuracy. Increase for extra margin.",
+};
+
 function fieldHelpText(indicatorName: IndicatorName, fieldKey: string): string | undefined {
   if (indicatorName === "relative_volume") {
     return RELATIVE_VOLUME_FIELD_HELP_TEXT[fieldKey] ?? FIELD_HELP_TEXT[fieldKey];
+  }
+
+  if (indicatorName === "adx") {
+    return ADX_FIELD_HELP_TEXT[fieldKey] ?? FIELD_HELP_TEXT[fieldKey];
   }
 
   return FIELD_HELP_TEXT[fieldKey];
@@ -516,7 +525,7 @@ export function IndicatorsFilter({
                             className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                           />
                         )}
-                        {field.type === "boolean" && (ind.name === "volume" || ind.name === "current_volume" || ind.name === "volatility") && (
+                        {field.type === "boolean" && (ind.name === "adx" || ind.name === "volume" || ind.name === "current_volume" || ind.name === "volatility") && (
                           <input
                             type="checkbox"
                             checked={Boolean(ind.config[field.key])}
@@ -524,7 +533,7 @@ export function IndicatorsFilter({
                             className="h-4 w-4 rounded border border-border bg-secondary text-primary"
                           />
                         )}
-                        {field.type === "boolean" && ind.name !== "volume" && ind.name !== "current_volume" && ind.name !== "volatility" && (
+                        {field.type === "boolean" && ind.name !== "adx" && ind.name !== "volume" && ind.name !== "current_volume" && ind.name !== "volatility" && (
                           <button
                             onClick={() => updateConfig(idx, field.key, !ind.config[field.key])}
                             className={`h-7 w-7 rounded border transition-colors ${
