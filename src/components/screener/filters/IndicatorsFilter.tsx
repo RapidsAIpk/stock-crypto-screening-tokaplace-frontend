@@ -1,7 +1,11 @@
 import { useState } from "react";
 import type { AreaRule, IndicatorConfig, IndicatorName, IndicatorTimeframe, TimeframeMode, TrendyAdxCondition } from "@/types/screener";
 import {
-  CONFIRMATION_PATTERNS,
+  allowedConfirmationPatternsForTypes,
+  collectConfirmationTypes,
+  filterConfirmationPatternsForTypes,
+  filterVlrCandlePatternsForDirection,
+  vlrAllowedCandlePatterns,
   CONFIRMATION_TYPES,
   DEFAULT_TREND_AREA_RULE,
   INDICATOR_DEFINITIONS,
@@ -11,6 +15,7 @@ import {
   TREND_CHANNEL_ZONE_ACTIONS,
   isTrendAreaRuleDisabled,
   getDefaultIndicatorConfig,
+  isChannelLineIndicatorFieldHidden,
   trendyAdxConditionsForMode,
 } from "@/types/screener";
 import { Plus, X, ChevronDown, ChevronRight } from "lucide-react";
@@ -47,13 +52,33 @@ export const INDICATOR_LABELS: Record<IndicatorName, string> = {
 
 const FIELD_HELP_TEXT: Record<string, string> = {
   window: "Number of candles from signal start until now.",
-  confirmation_window: "How many candles after signal to confirm it.",
-  confirmation_types: "Confirmation candle direction or strength required after the signal.",
-  confirmation_patterns: "Named candlestick confirmations from the long/short pattern dictionary.",
+  confirmation_window: "How many candles after the signal to check (type OR pattern — first match wins).",
+  confirmation_types:
+    "Direction filter: any matching candle in the window passes. Auto = no type; use patterns only.",
+  confirmation_type:
+    "Direction filter: any matching candle in the window passes. Auto = no type; use patterns only.",
+  confirmation_patterns:
+    "Named shapes only (Auto type). With a type selected, only same-direction patterns are shown and sent.",
+  candle_confirmation_patterns:
+    "Named candle shapes for VLR. Options follow Direction (bullish / bearish / both).",
   tolerance_pct: "Extra tolerance for signal matching. Increase to relax strictness.",
   r_filter: "Ignore trend strength, require Strong (R >= 0.70), or use the 0.50-0.80 band.",
-  window_type: "Continuous uses every candle in the lookback; Interval samples every nth candle.",
-  interval_step: "Used when Window Type is Interval. Example: 2 reads every second candle.",
+  window_type:
+    "Continuous fits a fixed lookback window. Interval resets each UTC day and grows bar-by-bar through that day.",
+  interval_step:
+    "Only used in Interval mode. Uses every Nth bar from the start of each UTC day and holds the channel between sampled bars.",
+  touch_type:
+    "Only applies when Signal is Touch. Body checks the open-close body, Wick checks either actual wick, and Both accepts either a body or wick touch.",
+  action:
+    "Touch checks wick/body against the line. Close checks the candle close. Stay requires the entire candle, including both wicks, to remain on one side.",
+  tolerance:
+    "Expands the line by this percent for all signal types. 0 = exact line price (after tick rounding on stocks).",
+  window_touch:
+    "Current consecutive Touch signal must be exactly this many candles old. Shorter and older signals are excluded.",
+  window_close:
+    "Close/stay condition must have lasted exactly this many candles. 1 = started on the latest candle.",
+  confirmation:
+    "Optional candlestick confirmation after the line signal (patterns/direction), not a second line rule.",
   show_last_channel: "Keeps the latest detected pivot channel visible after a break, similar to TradingView.",
   wait_for_break: "Locks the active pivot channel in place until a liquidity-style break confirms.",
   lr_length: "TradingView default is 11. Matches Humble LinReg Candles “Linear Regression Length”.",
@@ -74,6 +99,10 @@ function isTrendZoneArea(area?: string): boolean {
   return Boolean(area?.endsWith("_zone"));
 }
 
+function isTrendLineArea(area?: string): boolean {
+  return Boolean(area?.endsWith("_line"));
+}
+
 function trendActionsForArea(area?: string): readonly string[] {
   if (area === TREND_CHANNEL_DISABLED) {
     return [TREND_CHANNEL_DISABLED];
@@ -86,6 +115,32 @@ function trendActionsForArea(area?: string): readonly string[] {
 
 function defaultTrendAction(area?: string): string {
   return isTrendZoneArea(area) ? "entered" : "touched";
+}
+
+function normalizedTrendAction(area: AreaRule): string {
+  return String(area.action ?? defaultTrendAction(area.area)).trim().toLowerCase();
+}
+
+function trendAreaRuleUsesTouchType(area: AreaRule): boolean {
+  const action = normalizedTrendAction(area);
+  if (action === "touched") return true;
+  return isTrendZoneArea(area.area) && (action === "entered" || action === "rejected");
+}
+
+function trendAreaRuleUsesBreachControls(area: AreaRule): boolean {
+  return normalizedTrendAction(area) === "breach";
+}
+
+function trendAreaRuleHasConfirmationCriteria(area: AreaRule): boolean {
+  return Boolean(
+    area.confirmation_type
+      || (area.confirmation_types?.length ?? 0) > 0
+      || (area.confirmation_patterns?.length ?? 0) > 0,
+  );
+}
+
+function inactiveTrendSubfilterClass(disabled: boolean): string {
+  return disabled ? "opacity-45" : "";
 }
 
 function formatOptionLabel(fieldKey: string, option: string): string {
@@ -144,6 +199,15 @@ export function IndicatorsFilter({
     onChange(updated);
   };
 
+  const updateConfigPatch = (index: number, patch: Record<string, unknown>) => {
+    const updated = [...indicators];
+    updated[index] = {
+      ...updated[index],
+      config: { ...updated[index].config, ...patch },
+    };
+    onChange(updated);
+  };
+
   const resetIndicatorConfig = (index: number) => {
     const updated = [...indicators];
     updated[index] = { ...updated[index], config: getDefaultIndicatorConfig(updated[index].name) };
@@ -169,6 +233,24 @@ export function IndicatorsFilter({
       return !ind.config.candle_confirmation;
     }
     return false;
+  };
+
+  const isIndicatorFieldHidden = (ind: IndicatorConfig, fieldKey: string): boolean => {
+    if (isVlrFieldHidden(ind, fieldKey)) {
+      return true;
+    }
+    return isChannelLineIndicatorFieldHidden(ind.name, ind.config, fieldKey);
+  };
+
+  const fieldHelpText = (ind: IndicatorConfig, fieldKey: string): string | undefined => {
+    if (fieldKey === "window" && (ind.name === "lrc" || ind.name === "regression" || ind.name === "trend")) {
+      if (ind.name === "trend") {
+        return FIELD_HELP_TEXT.window_touch;
+      }
+      const action = String(ind.config.action ?? "touch").trim().toLowerCase();
+      return action === "touch" ? FIELD_HELP_TEXT.window_touch : FIELD_HELP_TEXT.window_close;
+    }
+    return FIELD_HELP_TEXT[fieldKey];
   };
 
   const updateTimeframe = (index: number, tf: IndicatorTimeframe) => {
@@ -339,17 +421,18 @@ export function IndicatorsFilter({
                 <div className="px-3 pb-3 pt-1">
                   <div className="grid grid-cols-2 gap-2">
                     {def.fields.map((field) => {
-                      if (isVlrFieldHidden(ind, field.key)) {
+                      if (isIndicatorFieldHidden(ind, field.key)) {
                         return null;
                       }
+                      const helpText = fieldHelpText(ind, field.key);
                       return (
                       <div
                         key={field.key}
                         className={`space-y-1 ${field.type === "area-list" || field.type === "condition-list" ? "col-span-2" : ""}`}
                       >
                         <div className="text-[10px] text-muted-foreground">{field.label}</div>
-                        {FIELD_HELP_TEXT[field.key] && (
-                          <div className="text-[9px] text-muted-foreground/80">{FIELD_HELP_TEXT[field.key]}</div>
+                        {helpText && (
+                          <div className="text-[9px] text-muted-foreground/80">{helpText}</div>
                         )}
                         {field.type === "number" && (
                           <input
@@ -396,6 +479,29 @@ export function IndicatorsFilter({
                                 onChange(updated);
                                 return;
                               }
+                              if (field.key === "confirmation_type") {
+                                const nextType = e.target.value || null;
+                                const types = nextType ? [nextType] : [];
+                                updateConfigPatch(idx, {
+                                  confirmation_type: nextType,
+                                  confirmation_patterns: filterConfirmationPatternsForTypes(
+                                    types,
+                                    ind.config.confirmation_patterns as string[] | null | undefined,
+                                  ),
+                                });
+                                return;
+                              }
+                              if (ind.name === "vlr" && field.key === "direction") {
+                                const nextDirection = e.target.value || "both";
+                                updateConfigPatch(idx, {
+                                  direction: nextDirection,
+                                  candle_confirmation_patterns: filterVlrCandlePatternsForDirection(
+                                    nextDirection,
+                                    ind.config.candle_confirmation_patterns as string[] | null | undefined,
+                                  ),
+                                });
+                                return;
+                              }
                               updateConfig(idx, field.key, e.target.value || null);
                             }}
                             className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
@@ -408,13 +514,30 @@ export function IndicatorsFilter({
                         )}
                         {field.type === "multi-select" && (
                           <div className="flex flex-wrap gap-1">
-                            {field.options?.map((opt) => {
+                            {(field.key === "confirmation_patterns"
+                              ? allowedConfirmationPatternsForTypes(collectConfirmationTypes(ind.config))
+                              : field.key === "candle_confirmation_patterns"
+                                ? vlrAllowedCandlePatterns(String(ind.config.direction ?? "both"))
+                                : field.options)?.map((opt) => {
                               const arr = (ind.config[field.key] as string[]) || [];
                               const sel = arr.includes(opt);
                               return (
                                 <button
                                   key={opt}
                                   onClick={() => {
+                                    if (field.key === "confirmation_types") {
+                                      const nextTypes = sel
+                                        ? arr.filter((v) => v !== opt)
+                                        : [...arr, opt];
+                                      updateConfigPatch(idx, {
+                                        confirmation_types: nextTypes,
+                                        confirmation_patterns: filterConfirmationPatternsForTypes(
+                                          nextTypes,
+                                          ind.config.confirmation_patterns as string[] | null | undefined,
+                                        ),
+                                      });
+                                      return;
+                                    }
                                     const next = sel ? arr.filter((v) => v !== opt) : [...arr, opt];
                                     updateConfig(idx, field.key, next);
                                   }}
@@ -430,7 +553,15 @@ export function IndicatorsFilter({
                         )}
                         {field.type === "area-list" && (
                           <div className="col-span-2 space-y-2 rounded-md border border-border/70 p-2">
-                            {(((ind.config[field.key] as AreaRule[]) ?? [])).map((area, areaIdx) => (
+                            {(((ind.config[field.key] as AreaRule[]) ?? [])).map((area, areaIdx) => {
+                              const disabledRule = isTrendAreaRuleDisabled(area);
+                              const areaAction = normalizedTrendAction(area);
+                              const touchTypeActive = !disabledRule && trendAreaRuleUsesTouchType(area);
+                              const breachControlsActive = !disabledRule && trendAreaRuleUsesBreachControls(area);
+                              const confirmationActive = !disabledRule && Boolean(area.confirmation);
+                              const confirmationCriteriaActive = confirmationActive;
+                              const confirmationWindowActive = confirmationActive && trendAreaRuleHasConfirmationCriteria(area);
+                              return (
                               <div key={`${field.key}-${areaIdx}`} className="space-y-2 rounded border border-border/60 p-2">
                                 <div className="flex items-center justify-between">
                                   <div className="text-[10px] text-muted-foreground">Area Rule {areaIdx + 1}</div>
@@ -494,18 +625,26 @@ export function IndicatorsFilter({
                                       ))}
                                     </select>
                                   </div>
-                                  {!isTrendAreaRuleDisabled(area) && (area.action === "touched" || area.action === "breach") && (
-                                    <div className="space-y-1">
+                                  {!disabledRule && !isTrendLineArea(area.area) && areaAction === "touched" && (
+                                    <div className="col-span-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-100">
+                                      Touch is only a line action. Choose a line area or switch this zone rule to entered, rejected, or breach.
+                                    </div>
+                                  )}
+                                  {!disabledRule && !isTrendZoneArea(area.area) && (areaAction === "entered" || areaAction === "rejected") && (
+                                    <div className="col-span-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-100">
+                                      Entered/rejected only apply to zones. Choose a zone area or switch this line rule to touched, close, on line, or breach.
+                                    </div>
+                                  )}
+                                  {!disabledRule && (
+                                    <div className={`space-y-1 ${inactiveTrendSubfilterClass(!touchTypeActive)}`}>
                                       <div className="text-[10px] text-muted-foreground">
-                                        {area.action === "breach" ? "Breach Type" : "Touch Type"}
+                                        Touch Type
                                       </div>
                                       <select
-                                        value={area.action === "breach" ? (area.breach_type ?? "wick") : (area.touch_type ?? "wick")}
-                                        onChange={(e) => {
-                                          updateAreaRulePatch(idx, areaIdx, area.action === "breach"
-                                            ? { breach_type: e.target.value }
-                                            : { touch_type: e.target.value });
-                                        }}
+                                        value={area.touch_type ?? "wick"}
+                                        onChange={(e) => updateAreaRulePatch(idx, areaIdx, { touch_type: e.target.value })}
+                                        disabled={!touchTypeActive}
+                                        title={touchTypeActive ? undefined : "Ignored unless the action checks a touch/entry/rejection overlap."}
                                         className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                       >
                                         {["wick", "body", "both"].map((option) => (
@@ -514,12 +653,30 @@ export function IndicatorsFilter({
                                       </select>
                                     </div>
                                   )}
-                                  {!isTrendAreaRuleDisabled(area) && area.action === "breach" && (
-                                    <div className="space-y-1">
+                                  {!disabledRule && (
+                                    <div className={`space-y-1 ${inactiveTrendSubfilterClass(!breachControlsActive)}`}>
+                                      <div className="text-[10px] text-muted-foreground">Breach Type</div>
+                                      <select
+                                        value={area.breach_type ?? "wick"}
+                                        onChange={(e) => updateAreaRulePatch(idx, areaIdx, { breach_type: e.target.value })}
+                                        disabled={!breachControlsActive}
+                                        title={breachControlsActive ? undefined : "Ignored unless Action is breach."}
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      >
+                                        {["wick", "body", "both"].map((option) => (
+                                          <option key={option} value={option}>{option}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+                                  {!disabledRule && (
+                                    <div className={`space-y-1 ${inactiveTrendSubfilterClass(!breachControlsActive)}`}>
                                       <div className="text-[10px] text-muted-foreground">Breach Direction</div>
                                       <select
                                         value={area.breach_direction ?? "any"}
                                         onChange={(e) => updateAreaRule(idx, areaIdx, "breach_direction", e.target.value)}
+                                        disabled={!breachControlsActive}
+                                        title={breachControlsActive ? undefined : "Ignored unless Action is breach."}
                                         className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                       >
                                         {["any", "up", "down"].map((option) => (
@@ -528,7 +685,7 @@ export function IndicatorsFilter({
                                       </select>
                                     </div>
                                   )}
-                                  {!isTrendAreaRuleDisabled(area) && (
+                                  {!disabledRule && (
                                   <>
                                   <div className="space-y-1">
                                     <div className="text-[10px] text-muted-foreground">Window</div>
@@ -558,11 +715,23 @@ export function IndicatorsFilter({
                                       }`}
                                     />
                                   </div>
-                                  <div className="space-y-1">
+                                  <div className={`space-y-1 ${inactiveTrendSubfilterClass(!confirmationCriteriaActive)}`}>
                                     <div className="text-[10px] text-muted-foreground">Confirmation Type</div>
                                     <select
                                       value={area.confirmation_type ?? ""}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "confirmation_type", e.target.value || null)}
+                                      onChange={(e) => {
+                                        const nextType = e.target.value || null;
+                                        const types = nextType ? [nextType] : [];
+                                        updateAreaRulePatch(idx, areaIdx, {
+                                          confirmation_type: nextType,
+                                          confirmation_patterns: filterConfirmationPatternsForTypes(
+                                            types,
+                                            area.confirmation_patterns,
+                                          ),
+                                        });
+                                      }}
+                                      disabled={!confirmationCriteriaActive}
+                                      title={confirmationCriteriaActive ? undefined : "Ignored unless Require Confirmation is enabled."}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                     >
                                       <option value="">Auto</option>
@@ -571,23 +740,29 @@ export function IndicatorsFilter({
                                       ))}
                                     </select>
                                   </div>
-                                  <div className="space-y-1">
+                                  <div className={`space-y-1 ${inactiveTrendSubfilterClass(!confirmationWindowActive)}`}>
                                     <div className="text-[10px] text-muted-foreground">Confirmation Window</div>
                                     <input
                                       type="number"
                                       value={(area.confirmation_window as number) ?? 1}
                                       onChange={(e) => updateAreaRule(idx, areaIdx, "confirmation_window", e.target.value ? Number(e.target.value) : 1)}
+                                      disabled={!confirmationWindowActive}
+                                      title={confirmationWindowActive ? undefined : "Ignored until confirmation is enabled and a confirmation type or pattern is selected."}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                     />
                                   </div>
-                                  <div className="space-y-1 col-span-2">
+                                  <div className={`space-y-1 col-span-2 ${inactiveTrendSubfilterClass(!confirmationCriteriaActive)}`}>
                                     <div className="text-[10px] text-muted-foreground">Confirmation Patterns</div>
                                     <div className="flex flex-wrap gap-1">
-                                      {CONFIRMATION_PATTERNS.map((option) => {
+                                      {allowedConfirmationPatternsForTypes(
+                                        area.confirmation_type ? [area.confirmation_type] : [],
+                                      ).map((option) => {
                                         const selected = (area.confirmation_patterns ?? []).includes(option);
                                         return (
                                           <button
                                             key={option}
+                                            disabled={!confirmationCriteriaActive}
+                                            title={confirmationCriteriaActive ? undefined : "Ignored unless Require Confirmation is enabled."}
                                             onClick={() => {
                                               const current = area.confirmation_patterns ?? [];
                                               const next = selected
@@ -599,7 +774,7 @@ export function IndicatorsFilter({
                                               selected
                                                 ? "border-primary bg-primary/10 text-accent-foreground"
                                                 : "border-border text-muted-foreground"
-                                            }`}
+                                            } disabled:cursor-not-allowed disabled:opacity-45`}
                                           >
                                             {option.replace(/_/g, " ")}
                                           </button>
@@ -609,14 +784,15 @@ export function IndicatorsFilter({
                                   </div>
                                   </>
                                   )}
-                                  {isTrendAreaRuleDisabled(area) && (
+                                  {disabledRule && (
                                     <div className="col-span-2 rounded border border-dashed border-border/70 px-2 py-2 text-[10px] text-muted-foreground">
                                       This area rule is disabled and will be skipped during screening.
                                     </div>
                                   )}
                                 </div>
                               </div>
-                            ))}
+                              );
+                            })}
                             <button
                               onClick={() => addAreaRule(idx)}
                               className="rounded border border-border px-2 py-1 text-[10px] text-foreground transition-colors hover:border-primary/60"

@@ -3,9 +3,79 @@ import type { MarketCandle } from "@/types/screener";
 import {
   createLinearRegressionCandles,
   normalizeMarketCandles,
+  normalizeRegressionChannel,
+  normalizeTrendChannel,
+  regressionValueAt,
+  trendValueAt,
 } from "./resultDetailChartData";
 
 describe("result detail chart candle data", () => {
+  it("aligns backend regression values to the last channel-length candles", () => {
+    const channel = normalizeRegressionChannel({
+      regression: {
+        length: 3,
+        upper: [11, 12, 13],
+        middle: [10, 11, 12],
+        lower: [9, 10, 11],
+      },
+    });
+
+    expect(channel).not.toBeNull();
+    expect(regressionValueAt(channel!, "middle", 1, 5)).toBeNull();
+    expect(regressionValueAt(channel!, "middle", 2, 5)).toBe(10);
+    expect(regressionValueAt(channel!, "middle", 4, 5)).toBe(12);
+  });
+
+  it("rejects incomplete regression series instead of drawing misaligned lines", () => {
+    expect(normalizeRegressionChannel({
+      regression: { length: 3, upper: [1, 2, 3], middle: [], lower: [1, 2, 3] },
+    })).toBeNull();
+  });
+
+  it("aligns backend trend-channel values to the last channel-length candles", () => {
+    const channel = normalizeTrendChannel({
+      trend: {
+        length: 3,
+        top: [13, 14, 15],
+        top_zone_lower: [12, 13, 14],
+        top_zone_mid: [12.5, 13.5, 14.5],
+        middle: [10, 11, 12],
+        bottom_zone_upper: [8, 9, 10],
+        bottom_zone_mid: [7.5, 8.5, 9.5],
+        bottom: [7, 8, 9],
+        direction: "up",
+        broken: false,
+      },
+    });
+
+    expect(channel).not.toBeNull();
+    expect(channel).toMatchObject({ length: 3, direction: "up", broken: false });
+    expect(trendValueAt(channel!, "middle", 1, 5)).toBeNull();
+    expect(trendValueAt(channel!, "top", 2, 5)).toBe(13);
+    expect(trendValueAt(channel!, "top_zone_mid", 4, 5)).toBe(14.5);
+    expect(trendValueAt(channel!, "bottom_zone_mid", 4, 5)).toBe(9.5);
+    expect(trendValueAt(channel!, "bottom", 4, 5)).toBe(9);
+  });
+
+  it("rejects incomplete trend channels and tolerates missing optional zone boundaries", () => {
+    expect(normalizeTrendChannel({
+      trend: { length: 3, top: [1, 2, 3], middle: [], bottom: [1, 2, 3] },
+    })).toBeNull();
+
+    const channel = normalizeTrendChannel({
+      trend: {
+        length: 2,
+        top: [11, 12],
+        middle: [10, 11],
+        bottom: [9, 10],
+      },
+    });
+    expect(channel?.top_zone_lower).toEqual([null, null]);
+    expect(channel?.top_zone_mid).toEqual([null, null]);
+    expect(channel?.bottom_zone_upper).toEqual([null, null]);
+    expect(channel?.bottom_zone_mid).toEqual([null, null]);
+  });
+
   it("normalizes Massive aggregate keys, milliseconds, ordering, and duplicates", () => {
     const candles = normalizeMarketCandles([
       { t: 2_000_000_000_000, o: 20, h: 23, l: 19, c: 22, v: 100 },

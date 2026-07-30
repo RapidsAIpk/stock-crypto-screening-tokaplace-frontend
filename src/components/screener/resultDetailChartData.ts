@@ -11,6 +11,39 @@ export interface ChartCandle extends MarketCandle {
   signal?: number;
 }
 
+export interface RegressionChannelSeries {
+  upper: Array<number | null>;
+  q3: Array<number | null>;
+  middle: Array<number | null>;
+  q1: Array<number | null>;
+  lower: Array<number | null>;
+  length: number;
+}
+
+export type RegressionChannelLine = "upper" | "q3" | "middle" | "q1" | "lower";
+
+export interface TrendChannelSeries {
+  top: Array<number | null>;
+  top_zone_lower: Array<number | null>;
+  top_zone_mid: Array<number | null>;
+  middle: Array<number | null>;
+  bottom_zone_upper: Array<number | null>;
+  bottom_zone_mid: Array<number | null>;
+  bottom: Array<number | null>;
+  length: number;
+  direction: "up" | "down" | null;
+  broken: boolean;
+}
+
+export type TrendChannelLine =
+  | "top"
+  | "top_zone_lower"
+  | "top_zone_mid"
+  | "middle"
+  | "bottom_zone_upper"
+  | "bottom_zone_mid"
+  | "bottom";
+
 function finiteNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -56,6 +89,107 @@ export function normalizeMarketCandles(
   }
 
   return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+export function normalizeRegressionChannel(
+  channels: Record<string, unknown> | null | undefined,
+): RegressionChannelSeries | null {
+  const raw = channels?.regression;
+  if (!raw || typeof raw !== "object") return null;
+
+  const source = raw as Record<string, unknown>;
+  const normalizeSeries = (value: unknown): Array<number | null> => (
+    Array.isArray(value)
+      ? value.map((item) => item == null ? null : finiteNumber(item))
+      : []
+  );
+  const upper = normalizeSeries(source.upper);
+  const q3 = normalizeSeries(source.q3);
+  const middle = normalizeSeries(source.middle);
+  const q1 = normalizeSeries(source.q1);
+  const lower = normalizeSeries(source.lower);
+  const availableLength = Math.min(upper.length, middle.length, lower.length);
+  const configuredLength = Math.trunc(Number(source.length));
+  const length = Number.isFinite(configuredLength) && configuredLength > 0
+    ? Math.min(configuredLength, availableLength)
+    : availableLength;
+
+  if (length <= 0) return null;
+  return {
+    upper: upper.slice(-length),
+    q3: q3.length >= length ? q3.slice(-length) : Array(length).fill(null),
+    middle: middle.slice(-length),
+    q1: q1.length >= length ? q1.slice(-length) : Array(length).fill(null),
+    lower: lower.slice(-length),
+    length,
+  };
+}
+
+export function regressionValueAt(
+  channel: RegressionChannelSeries,
+  line: RegressionChannelLine,
+  candleIndex: number,
+  candleCount: number,
+): number | null {
+  const channelIndex = candleIndex - (candleCount - channel.length);
+  if (channelIndex < 0 || channelIndex >= channel.length) return null;
+  return channel[line][channelIndex] ?? null;
+}
+
+export function normalizeTrendChannel(
+  channels: Record<string, unknown> | null | undefined,
+): TrendChannelSeries | null {
+  const raw = channels?.trend;
+  if (!raw || typeof raw !== "object") return null;
+
+  const source = raw as Record<string, unknown>;
+  const normalizeSeries = (value: unknown): Array<number | null> => (
+    Array.isArray(value)
+      ? value.map((item) => item == null ? null : finiteNumber(item))
+      : []
+  );
+  const top = normalizeSeries(source.top);
+  const topZoneLower = normalizeSeries(source.top_zone_lower);
+  const topZoneMid = normalizeSeries(source.top_zone_mid);
+  const middle = normalizeSeries(source.middle);
+  const bottomZoneUpper = normalizeSeries(source.bottom_zone_upper);
+  const bottomZoneMid = normalizeSeries(source.bottom_zone_mid);
+  const bottom = normalizeSeries(source.bottom);
+  const availableLength = Math.min(top.length, middle.length, bottom.length);
+  const configuredLength = Math.trunc(Number(source.length));
+  const length = Number.isFinite(configuredLength) && configuredLength > 0
+    ? Math.min(configuredLength, availableLength)
+    : availableLength;
+
+  if (length <= 0) return null;
+  const optionalSeries = (series: Array<number | null>) => (
+    series.length >= length ? series.slice(-length) : Array<number | null>(length).fill(null)
+  );
+  const rawDirection = String(source.direction ?? "").trim().toLowerCase();
+
+  return {
+    top: top.slice(-length),
+    top_zone_lower: optionalSeries(topZoneLower),
+    top_zone_mid: optionalSeries(topZoneMid),
+    middle: middle.slice(-length),
+    bottom_zone_upper: optionalSeries(bottomZoneUpper),
+    bottom_zone_mid: optionalSeries(bottomZoneMid),
+    bottom: bottom.slice(-length),
+    length,
+    direction: rawDirection === "up" || rawDirection === "down" ? rawDirection : null,
+    broken: source.broken === true,
+  };
+}
+
+export function trendValueAt(
+  channel: TrendChannelSeries,
+  line: TrendChannelLine,
+  candleIndex: number,
+  candleCount: number,
+): number | null {
+  const channelIndex = candleIndex - (candleCount - channel.length);
+  if (channelIndex < 0 || channelIndex >= channel.length) return null;
+  return channel[line][channelIndex] ?? null;
 }
 
 function rollingLinearRegression(values: number[], length: number): number[] {

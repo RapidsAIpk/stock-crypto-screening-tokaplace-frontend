@@ -210,7 +210,7 @@ export interface IndicatorDetail {
   passed: boolean;
   sticker?: string | null;
   config: Record<string, unknown>;
-  evidence?: Record<string, unknown> | null;
+  evidence?: Record<string, unknown> | Array<Record<string, unknown>> | null;
 }
 
 export interface FilterDetail {
@@ -440,7 +440,9 @@ export const CONFIRMATION_TYPES = [
   "strong_bearish",
 ] as const;
 
-const BULLISH_CONFIRMATION_PATTERNS = [
+export type ConfirmationType = typeof CONFIRMATION_TYPES[number];
+
+export const BULLISH_CONFIRMATION_PATTERNS = [
   "bullish_engulfing",
   "hammer",
   "morning_star",
@@ -453,7 +455,7 @@ const BULLISH_CONFIRMATION_PATTERNS = [
   "double_bottom",
 ] as const;
 
-const BEARISH_CONFIRMATION_PATTERNS = [
+export const BEARISH_CONFIRMATION_PATTERNS = [
   "bearish_engulfing",
   "shooting_star",
   "evening_star",
@@ -470,6 +472,107 @@ export const CONFIRMATION_PATTERNS = [
   ...BULLISH_CONFIRMATION_PATTERNS,
   ...BEARISH_CONFIRMATION_PATTERNS,
 ] as const;
+
+export type ConfirmationPattern = typeof CONFIRMATION_PATTERNS[number];
+
+export function isBullishConfirmationType(type: string): boolean {
+  return type === "bullish" || type === "strong_bullish";
+}
+
+export function isBearishConfirmationType(type: string): boolean {
+  return type === "bearish" || type === "strong_bearish";
+}
+
+export function collectConfirmationTypes(config: Record<string, unknown>): string[] {
+  const types = [...((config.confirmation_types as string[] | null | undefined) ?? [])];
+  const singleType = config.confirmation_type;
+  if (typeof singleType === "string" && singleType.length > 0 && !types.includes(singleType)) {
+    types.unshift(singleType);
+  }
+  return types;
+}
+
+export function allowedConfirmationPatternsForTypes(
+  types: string[],
+): readonly ConfirmationPattern[] {
+  if (types.length === 0) {
+    return CONFIRMATION_PATTERNS;
+  }
+
+  const bullish = types.some(isBullishConfirmationType);
+  const bearish = types.some(isBearishConfirmationType);
+
+  if (bullish && bearish) {
+    return CONFIRMATION_PATTERNS;
+  }
+  if (bullish) {
+    return BULLISH_CONFIRMATION_PATTERNS;
+  }
+  if (bearish) {
+    return BEARISH_CONFIRMATION_PATTERNS;
+  }
+
+  return CONFIRMATION_PATTERNS;
+}
+
+export function filterConfirmationPatternsForTypes(
+  types: string[],
+  patterns: string[] | null | undefined,
+): string[] {
+  const allowed = new Set<string>(allowedConfirmationPatternsForTypes(types));
+  return (patterns ?? []).filter((pattern) => allowed.has(pattern));
+}
+
+export function vlrAllowedCandlePatterns(direction: string): readonly string[] {
+  const token = String(direction || "both").trim().toLowerCase();
+  if (token === "bullish") {
+    return ["bullish_engulfing", "hammer", "morning_star"];
+  }
+  if (token === "bearish") {
+    return ["bearish_engulfing", "shooting_star", "evening_star"];
+  }
+  return VLR_CANDLE_PATTERNS;
+}
+
+export function filterVlrCandlePatternsForDirection(
+  direction: string,
+  patterns: string[] | null | undefined,
+): string[] {
+  const allowed = new Set<string>(vlrAllowedCandlePatterns(direction));
+  return (patterns ?? []).filter((pattern) => allowed.has(pattern));
+}
+
+export function normalizeConfirmationConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...config };
+
+  if (Array.isArray(next.areas)) {
+    next.areas = next.areas.map((area) => (
+      typeof area === "object" && area !== null
+        ? normalizeConfirmationConfig(area as Record<string, unknown>)
+        : area
+    ));
+  }
+
+  if (next.candle_confirmation) {
+    next.candle_confirmation_patterns = filterVlrCandlePatternsForDirection(
+      String(next.direction ?? "both"),
+      next.candle_confirmation_patterns as string[] | null | undefined,
+    );
+  }
+
+  if (!next.confirmation) {
+    return next;
+  }
+
+  const types = collectConfirmationTypes(next);
+  next.confirmation_patterns = filterConfirmationPatternsForTypes(
+    types,
+    next.confirmation_patterns as string[] | null | undefined,
+  );
+  return next;
+}
 
 const TOUCH_TYPES = [
   "wick",
@@ -506,6 +609,7 @@ export const TREND_CHANNEL_LINE_ACTIONS = [
   "closed_above",
   "closed_below",
   "on_line",
+  "breach",
 ] as const;
 
 export const TREND_CHANNEL_ZONE_ACTIONS = [
@@ -529,6 +633,65 @@ export const DEFAULT_TREND_AREA_RULE: AreaRule = {
   confirmation_patterns: [],
   confirmation_window: null,
 };
+
+export const CHANNEL_LINE_TOUCH_ACTION = "touch" as const;
+
+export const CHANNEL_LINE_CLOSE_ACTIONS = [
+  "close_above",
+  "close_below",
+  "stay_above",
+  "stay_below",
+] as const;
+
+export type ChannelLineCloseAction = (typeof CHANNEL_LINE_CLOSE_ACTIONS)[number];
+
+export function isChannelLineTouchAction(action: unknown): boolean {
+  return String(action ?? CHANNEL_LINE_TOUCH_ACTION).trim().toLowerCase() === CHANNEL_LINE_TOUCH_ACTION;
+}
+
+export function isChannelLineCloseAction(action: unknown): boolean {
+  return CHANNEL_LINE_CLOSE_ACTIONS.includes(
+    String(action ?? "").trim().toLowerCase() as ChannelLineCloseAction,
+  );
+}
+
+/** Field visibility for LRC + Regression Channel (shared channel_line_rules backend). */
+export function isChannelLineIndicatorFieldHidden(
+  indicatorName: IndicatorName,
+  config: Record<string, unknown>,
+  fieldKey: string,
+): boolean {
+  if (indicatorName !== "lrc" && indicatorName !== "regression") {
+    return false;
+  }
+
+  const action = String(config.action ?? CHANNEL_LINE_TOUCH_ACTION).trim().toLowerCase();
+  const windowType = String(config.window_type ?? "continuous").trim().toLowerCase();
+  const confirmation = Boolean(config.confirmation);
+
+  if (fieldKey === "touch_type") {
+    return action !== CHANNEL_LINE_TOUCH_ACTION;
+  }
+
+  if (
+    fieldKey === "confirmation_types" ||
+    fieldKey === "confirmation_patterns" ||
+    fieldKey === "confirmation_window"
+  ) {
+    return !confirmation;
+  }
+
+  if (indicatorName === "regression") {
+    if (fieldKey === "length") {
+      return windowType === "interval";
+    }
+    if (fieldKey === "interval_step") {
+      return windowType !== "interval";
+    }
+  }
+
+  return false;
+}
 
 // --------------------------------------------------
 // TRENDY ADX (DI+/DI-/ADX, Bonavest reference) — condition catalog
@@ -662,13 +825,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
         key: "confirmation_types",
-        label: "Confirmation Candle",
+        label: "Confirmation Type (Auto = patterns only)",
         type: "multi-select",
         options: CONFIRMATION_TYPES,
       },
       {
         key: "confirmation_patterns",
-        label: "Pattern Confirmations",
+        label: "Confirmation Patterns",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
       },
@@ -706,13 +869,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
         key: "confirmation_types",
-        label: "Confirmation Candle",
+        label: "Confirmation Type (Auto = patterns only)",
         type: "multi-select",
         options: CONFIRMATION_TYPES,
       },
       {
         key: "confirmation_patterns",
-        label: "Pattern Confirmations",
+        label: "Confirmation Patterns",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
       },
@@ -747,13 +910,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
         key: "confirmation_types",
-        label: "Confirmation Candle",
+        label: "Confirmation Type (Auto = patterns only)",
         type: "multi-select",
         options: CONFIRMATION_TYPES,
       },
       {
         key: "confirmation_patterns",
-        label: "Pattern Confirmations",
+        label: "Confirmation Patterns",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
       },
@@ -871,7 +1034,7 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         type: "select",
         options: TOUCH_TYPES,
       },
-      { key: "window", label: "Time Window (Candles)", type: "number" },
+      { key: "window", label: "How Many Candles", type: "number" },
       { key: "tolerance", label: "Tolerance %", type: "number" },
       {
         key: "r_filter",
@@ -882,13 +1045,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
         key: "confirmation_types",
-        label: "Confirmation Candle",
+        label: "Confirmation Type (Auto = patterns only)",
         type: "multi-select",
         options: CONFIRMATION_TYPES,
       },
       {
         key: "confirmation_patterns",
-        label: "Pattern Confirmations",
+        label: "Confirmation Patterns",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
       },
@@ -925,18 +1088,18 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         type: "select",
         options: TOUCH_TYPES,
       },
-      { key: "window", label: "Time Window (Candles)", type: "number" },
+      { key: "window", label: "How Many Candles", type: "number" },
       { key: "tolerance", label: "Tolerance %", type: "number" },
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
         key: "confirmation_types",
-        label: "Confirmation Candle",
+        label: "Confirmation Type (Auto = patterns only)",
         type: "multi-select",
         options: CONFIRMATION_TYPES,
       },
       {
         key: "confirmation_patterns",
-        label: "Pattern Confirmations",
+        label: "Confirmation Patterns",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
       },
@@ -984,13 +1147,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
         key: "confirmation_type",
-        label: "Confirmation Candle",
+        label: "Confirmation Type (Auto = patterns only)",
         type: "select",
         options: ["bullish", "bearish", "strong_bullish", "strong_bearish"],
       },
       {
         key: "confirmation_patterns",
-        label: "Pattern Confirmations",
+        label: "Confirmation Patterns",
         type: "multi-select",
         options: CONFIRMATION_PATTERNS,
       },
@@ -1325,13 +1488,14 @@ export function getDefaultConfluenceConfig(): typeof CONFLUENCE_DEFAULT_CONFIG {
 
 export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorConfig {
   const defaults = getDefaultIndicatorConfig(indicator.name);
+  const merged = {
+    ...defaults,
+    ...(indicator.config ?? {}),
+  };
 
   return {
     ...indicator,
-    config: {
-      ...defaults,
-      ...(indicator.config ?? {}),
-    },
+    config: normalizeConfirmationConfig(merged) as IndicatorConfig["config"],
   };
 }
 

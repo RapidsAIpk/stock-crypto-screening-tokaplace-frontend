@@ -1,60 +1,106 @@
-import { useMemo, useState, type PointerEvent } from "react";
-import { CandlestickChart, LineChart, Radio } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CandlestickChart, Expand, LineChart, Radio, RotateCcw } from "lucide-react";
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  CrosshairMode,
+  LineSeries,
+  LineStyle,
+  type CandlestickData,
+  type LineData,
+  type Time,
+  type UTCTimestamp,
+} from "lightweight-charts";
 import type { IndicatorDetail, MarketCandle } from "@/types/screener";
 import {
   createLinearRegressionCandles,
   normalizeMarketCandles,
+  normalizeRegressionChannel,
+  normalizeTrendChannel,
+  regressionValueAt,
+  trendValueAt,
   type ChartCandle,
   type LinRegSettings,
+  type RegressionChannelLine,
 } from "./resultDetailChartData";
+import {
+  addTrendChannelFills,
+  buildTrendLineData,
+  TREND_BOTTOM_COLOR,
+  TREND_CENTER_COLOR,
+  TREND_TOP_COLOR,
+  TV_BACKGROUND,
+} from "./trendChannelChartStyles";
 
-type ChartMode = "price" | "linreg";
+type ChartMode = "price" | "regression" | "trend" | "linreg";
 type RangeOption = 20 | 50 | 100 | "all";
 
 interface Props {
   candles: Array<MarketCandle | Record<string, unknown>>;
   indicatorDetails: IndicatorDetail[];
+  channels: Record<string, unknown>;
   symbol: string;
   timeframe: string;
   timeZone: string;
   provider?: string | null;
 }
 
-const CHART_WIDTH = 1000;
-const CHART_HEIGHT = 430;
-const PLOT_LEFT = 16;
-const PLOT_RIGHT = 84;
-const PLOT_TOP = 24;
-const PRICE_BOTTOM = 326;
-const VOLUME_TOP = 340;
-const VOLUME_BOTTOM = 382;
+
+const TV_GRID = "#24282f";
+const TV_TEXT = "#b2b5be";
+const TV_BORDER = "#2a2e39";
+const UP_COLOR = "#089981";
+const DOWN_COLOR = "#f23645";
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function compactPrice(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}m`;
-  if (abs >= 1_000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (abs >= 1) return value.toFixed(2);
-  return value.toPrecision(4);
+function compactVolume(value: number): string {
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
+  return value.toFixed(0);
 }
 
-function compactVolume(value: number): string {
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return value.toFixed(0);
+function decimalPlaces(value: number): number {
+  const fixed = Math.abs(value).toFixed(8).replace(/0+$/, "");
+  const decimal = fixed.split(".")[1];
+  return decimal?.length || 0;
+}
+
+function inferPricePrecision(candles: ChartCandle[]): number {
+  const sample = candles.slice(-200).flatMap((candle) => [
+    candle.open,
+    candle.high,
+    candle.low,
+    candle.close,
+  ]);
+  const observed = sample.reduce((maximum, value) => Math.max(maximum, decimalPlaces(value)), 0);
+  const smallest = Math.min(...sample.filter((value) => value > 0));
+  const minimum = smallest < 0.01 ? 6 : smallest < 1 ? 4 : 2;
+  return Math.min(8, Math.max(minimum, observed));
+}
+
+function formatPrice(value: number, precision: number): string {
+  return value.toFixed(precision).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+function unixTime(time: Time): number {
+  if (typeof time === "number") return time;
+  if (typeof time === "string") return Math.floor(new Date(`${time}T00:00:00Z`).getTime() / 1000);
+  return Math.floor(Date.UTC(time.year, time.month - 1, time.day) / 1000);
 }
 
 function formatTime(timestamp: number, timeZone: string, includeDate = true): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone,
-    ...(includeDate ? { month: "short", day: "numeric" } : {}),
+    ...(includeDate ? { month: "short", day: "numeric", year: "2-digit" } : {}),
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   }).format(new Date(timestamp * 1000));
 }
 
@@ -67,234 +113,448 @@ function linRegSettings(indicator: IndicatorDetail): LinRegSettings {
   };
 }
 
+function toCandleData(candles: ChartCandle[]): CandlestickData<UTCTimestamp>[] {
+  return candles.map((candle) => ({
+    time: candle.time as UTCTimestamp,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+  }));
+}
+
 export function ResultDetailChart({
   candles: rawCandles,
   indicatorDetails,
+  channels,
   symbol,
   timeframe,
   timeZone,
   provider,
 }: Props) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const chartHostRef = useRef<HTMLDivElement>(null);
+  const resetViewRef = useRef<() => void>(() => undefined);
   const candles = useMemo(() => normalizeMarketCandles(rawCandles), [rawCandles]);
+  const completedCandles = useMemo(
+    () => candles.filter((candle) => candle.is_closed !== false),
+    [candles],
+  );
+  const regressionChannel = useMemo(() => normalizeRegressionChannel(channels), [channels]);
+  const trendChannel = useMemo(() => normalizeTrendChannel(channels), [channels]);
+  const regressionIndicator = indicatorDetails.find((item) => item.name === "regression");
+  const trendIndicator = indicatorDetails.find((item) => item.name === "trend");
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
   const settings = useMemo(
     () => linRegSettings(linRegIndicator || { name: "linreg_candles", passed: false, config: {} }),
     [linRegIndicator],
   );
   const linRegCandles = useMemo(
-    () => createLinearRegressionCandles(candles, settings),
-    [candles, settings],
+    () => createLinearRegressionCandles(completedCandles, settings),
+    [completedCandles, settings],
   );
-  const [mode, setMode] = useState<ChartMode>(linRegIndicator ? "linreg" : "price");
-  const [range, setRange] = useState<RangeOption>(50);
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const initialMode: ChartMode = regressionIndicator && regressionChannel
+    ? "regression"
+    : trendIndicator && trendChannel
+      ? "trend"
+      : linRegIndicator
+        ? "linreg"
+        : "price";
+  const [mode, setMode] = useState<ChartMode>(
+    initialMode,
+  );
+  const [range, setRange] = useState<RangeOption>(100);
+  const [hoveredTime, setHoveredTime] = useState<number | null>(null);
 
-  const source: ChartCandle[] = mode === "linreg" && linRegIndicator ? linRegCandles : candles;
-  const visible = range === "all" ? source : source.slice(-range);
-  const selectedIndex = hoveredIndex !== null && hoveredIndex < visible.length
-    ? hoveredIndex
-    : Math.max(0, visible.length - 1);
-  const selected = visible[selectedIndex];
+  useEffect(() => {
+    const modeAvailable = (
+      mode === "price"
+      || (mode === "regression" && Boolean(regressionIndicator && regressionChannel))
+      || (mode === "trend" && Boolean(trendIndicator && trendChannel))
+      || (mode === "linreg" && Boolean(linRegIndicator))
+    );
+    if (!modeAvailable) setMode(initialMode);
+  }, [
+    initialMode,
+    linRegIndicator,
+    mode,
+    regressionChannel,
+    regressionIndicator,
+    trendChannel,
+    trendIndicator,
+  ]);
 
-  if (!candles.length) {
+  const source: ChartCandle[] = mode === "linreg" && linRegIndicator
+    ? linRegCandles
+    : completedCandles;
+  const precision = useMemo(() => inferPricePrecision(source), [source]);
+  const selectedIndex = useMemo(() => {
+    if (hoveredTime === null) return Math.max(0, source.length - 1);
+    const index = source.findIndex((candle) => candle.time === hoveredTime);
+    return index >= 0 ? index : Math.max(0, source.length - 1);
+  }, [hoveredTime, source]);
+  const selected = source[selectedIndex];
+  const selectedRegression = mode === "regression" && regressionChannel && selected
+    ? {
+        upper: regressionValueAt(regressionChannel, "upper", selectedIndex, source.length),
+        q3: regressionValueAt(regressionChannel, "q3", selectedIndex, source.length),
+        middle: regressionValueAt(regressionChannel, "middle", selectedIndex, source.length),
+        q1: regressionValueAt(regressionChannel, "q1", selectedIndex, source.length),
+        lower: regressionValueAt(regressionChannel, "lower", selectedIndex, source.length),
+      }
+    : null;
+  const selectedTrend = mode === "trend" && trendChannel && selected
+    ? {
+        top: trendValueAt(trendChannel, "top", selectedIndex, source.length),
+        topZoneLower: trendValueAt(
+          trendChannel,
+          "top_zone_lower",
+          selectedIndex,
+          source.length,
+        ),
+        middle: trendValueAt(trendChannel, "middle", selectedIndex, source.length),
+        bottomZoneUpper: trendValueAt(
+          trendChannel,
+          "bottom_zone_upper",
+          selectedIndex,
+          source.length,
+        ),
+        bottom: trendValueAt(trendChannel, "bottom", selectedIndex, source.length),
+      }
+    : null;
+
+  useEffect(() => {
+    const host = chartHostRef.current;
+    if (!host || !source.length) return undefined;
+
+    const chart = createChart(host, {
+      width: Math.max(320, host.clientWidth),
+      height: 560,
+      layout: {
+        background: { type: ColorType.Solid, color: TV_BACKGROUND },
+        textColor: TV_TEXT,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: 12,
+        attributionLogo: true,
+      },
+      grid: {
+        vertLines: { color: TV_GRID, style: LineStyle.Dotted },
+        horzLines: { color: TV_GRID, style: LineStyle.Dotted },
+      },
+      rightPriceScale: {
+        visible: true,
+        borderColor: TV_BORDER,
+        entireTextOnly: true,
+        scaleMargins: { top: 0.08, bottom: 0.08 },
+      },
+      leftPriceScale: { visible: false },
+      timeScale: {
+        visible: true,
+        borderColor: TV_BORDER,
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 6,
+        barSpacing: 9,
+        minBarSpacing: 2,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+        lockVisibleTimeRangeOnResize: false,
+        tickMarkFormatter: (time) => new Intl.DateTimeFormat(undefined, {
+          timeZone,
+          ...(timeframe.includes("day")
+            ? { month: "short", day: "numeric" }
+            : { hour: "2-digit", minute: "2-digit", hour12: false }),
+        }).format(new Date(unixTime(time) * 1000)),
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: "#758696",
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: "#363a45",
+          labelVisible: true,
+        },
+        horzLine: {
+          color: "#758696",
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: "#363a45",
+          labelVisible: true,
+        },
+      },
+      localization: {
+        priceFormatter: (price) => formatPrice(price, precision),
+        timeFormatter: (time) => formatTime(unixTime(time), timeZone),
+      },
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      kineticScroll: { mouse: true, touch: true },
+    });
+
+    if (mode === "trend" && trendChannel) {
+      addTrendChannelFills(chart, source, trendChannel, precision);
+    }
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: UP_COLOR,
+      downColor: DOWN_COLOR,
+      borderUpColor: UP_COLOR,
+      borderDownColor: DOWN_COLOR,
+      wickUpColor: UP_COLOR,
+      wickDownColor: DOWN_COLOR,
+      priceFormat: {
+        type: "price",
+        precision,
+        minMove: 10 ** -precision,
+      },
+      priceLineVisible: true,
+      priceLineColor: DOWN_COLOR,
+      lastValueVisible: true,
+    });
+    candleSeries.setData(toCandleData(source));
+
+    const addLine = (
+      color: string,
+      width: 1 | 2,
+      style: LineStyle,
+      data: LineData<UTCTimestamp>[],
+      lastValueVisible = false,
+    ) => {
+      const series = chart.addSeries(LineSeries, {
+        color,
+        lineWidth: width,
+        lineStyle: style,
+        crosshairMarkerVisible: false,
+        priceLineVisible: false,
+        lastValueVisible,
+        priceFormat: {
+          type: "price",
+          precision,
+          minMove: 10 ** -precision,
+        },
+      });
+      series.setData(data);
+    };
+
+    if (mode === "regression" && regressionChannel) {
+      const lineData = (line: RegressionChannelLine): LineData<UTCTimestamp>[] => (
+        source.flatMap((candle, candleIndex) => {
+          const value = regressionValueAt(regressionChannel, line, candleIndex, source.length);
+          return value === null ? [] : [{ time: candle.time as UTCTimestamp, value }];
+        })
+      );
+      addLine("#00e676", 2, LineStyle.Solid, lineData("upper"), true);
+      addLine("#00c853", 1, LineStyle.Dashed, lineData("q3"));
+      addLine("#d1d4dc", 2, LineStyle.Solid, lineData("middle"), true);
+      addLine("#ff5252", 1, LineStyle.Dashed, lineData("q1"));
+      addLine("#ff1744", 2, LineStyle.Solid, lineData("lower"), true);
+    }
+
+    if (mode === "trend" && trendChannel) {
+      addLine(TREND_TOP_COLOR, 2, LineStyle.Solid, buildTrendLineData(source, trendChannel, "top"), true);
+      addLine(TREND_CENTER_COLOR, 2, LineStyle.Dashed, buildTrendLineData(source, trendChannel, "middle"), true);
+      addLine(TREND_BOTTOM_COLOR, 2, LineStyle.Solid, buildTrendLineData(source, trendChannel, "bottom"), true);
+    }
+
+    if (mode === "linreg") {
+      const signal = source.flatMap((candle) => (
+        candle.signal === undefined
+          ? []
+          : [{ time: candle.time as UTCTimestamp, value: candle.signal }]
+      ));
+      addLine("#f8fafc", 2, LineStyle.Solid, signal, true);
+    }
+
+    const applyRange = () => {
+      if (range === "all" || source.length <= range) {
+        chart.timeScale().fitContent();
+        return;
+      }
+      chart.timeScale().setVisibleLogicalRange({
+        from: source.length - range - 0.5,
+        to: source.length - 0.5 + 6,
+      });
+    };
+    applyRange();
+    resetViewRef.current = () => {
+      candleSeries.priceScale().applyOptions({ autoScale: true });
+      applyRange();
+    };
+
+    chart.subscribeCrosshairMove((parameter) => {
+      setHoveredTime(parameter.time === undefined ? null : unixTime(parameter.time));
+    });
+
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) chart.applyOptions({ width: Math.floor(width) });
+    });
+    observer.observe(host);
+
+    return () => {
+      observer.disconnect();
+      resetViewRef.current = () => undefined;
+      chart.remove();
+    };
+  }, [mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
+
+  if (!completedCandles.length) {
     return (
       <div className="rounded-md border border-border/60 bg-background/25 p-4 text-sm text-muted-foreground">
-        No valid OHLC candles were returned for this chart.
+        No completed OHLC candles were returned for this chart.
       </div>
     );
   }
 
-  if (!visible.length) {
-    return (
-      <div className="rounded-md border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
-        LinReg needs more completed candles for the selected length.
-      </div>
-    );
-  }
-
-  const plotWidth = CHART_WIDTH - PLOT_LEFT - PLOT_RIGHT;
-  const step = plotWidth / visible.length;
-  const candleWidth = Math.max(2, Math.min(12, step * 0.62));
-  const priceValues = visible.flatMap((candle) => [
-    Math.min(candle.open, candle.high, candle.low, candle.close),
-    Math.max(candle.open, candle.high, candle.low, candle.close),
-    ...(candle.signal === undefined ? [] : [candle.signal]),
-  ]);
-  const minimum = Math.min(...priceValues);
-  const maximum = Math.max(...priceValues);
-  const padding = Math.max((maximum - minimum) * 0.08, Math.abs(maximum) * 0.001, 0.000001);
-  const domainMin = minimum - padding;
-  const domainMax = maximum + padding;
-  const priceY = (value: number) => (
-    PLOT_TOP + ((domainMax - value) / (domainMax - domainMin)) * (PRICE_BOTTOM - PLOT_TOP)
-  );
-  const xAt = (index: number) => PLOT_LEFT + step * (index + 0.5);
-  const maxVolume = Math.max(...visible.map((candle) => candle.volume || 0), 1);
-  const gridPrices = Array.from({ length: 5 }, (_, index) => (
-    domainMax - ((domainMax - domainMin) * index) / 4
-  ));
-  const labelIndexes = [...new Set([0, Math.floor((visible.length - 1) / 2), visible.length - 1])];
-  const signalPath = visible
-    .map((candle, index) => candle.signal === undefined ? null : `${xAt(index)},${priceY(candle.signal)}`)
-    .filter(Boolean)
-    .join(" ");
-
-  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const chartX = ((event.clientX - bounds.left) / bounds.width) * CHART_WIDTH;
-    const index = Math.floor((chartX - PLOT_LEFT) / step);
-    setHoveredIndex(Math.max(0, Math.min(visible.length - 1, index)));
+  const toggleFullscreen = async () => {
+    if (!wrapperRef.current) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await wrapperRef.current.requestFullscreen();
+    }
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-border/70 bg-[#091014]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-3 py-2.5">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm font-semibold text-foreground">{symbol}</span>
-            <span className="text-xs text-muted-foreground">{timeframe}</span>
-            <span className="flex items-center gap-1 text-[10px] uppercase text-emerald-300">
-              <Radio className="h-3 w-3" />
-              {provider || "market data"}
-            </span>
+    <div
+      ref={wrapperRef}
+      data-testid="trading-chart"
+      className="overflow-hidden rounded-lg border border-[#2a2e39] bg-[#0b0e11] text-[#d1d4dc] shadow-2xl"
+    >
+      <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-[#2a2e39] bg-[#101215] px-2 py-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#2962ff] text-xs font-bold text-white">
+            {symbol.slice(0, 1)}
           </div>
-          {selected ? (
-            <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] font-mono text-muted-foreground">
-              <span>{formatTime(selected.time, timeZone)}</span>
-              <span>O <b className="font-normal text-foreground">{compactPrice(selected.open)}</b></span>
-              <span>H <b className="font-normal text-foreground">{compactPrice(selected.high)}</b></span>
-              <span>L <b className="font-normal text-foreground">{compactPrice(selected.low)}</b></span>
-              <span>C <b className={selected.close >= selected.open ? "font-normal text-emerald-300" : "font-normal text-rose-300"}>{compactPrice(selected.close)}</b></span>
-              {selected.volume != null ? <span>V <b className="font-normal text-foreground">{compactVolume(selected.volume)}</b></span> : null}
-              {selected.signal !== undefined ? <span>Signal <b className="font-normal text-white">{compactPrice(selected.signal)}</b></span> : null}
-            </div>
-          ) : null}
+          <span className="font-mono text-sm font-semibold text-white">{symbol}</span>
+          <span className="rounded bg-[#1e222d] px-2 py-1 text-xs font-semibold text-[#d1d4dc]">{timeframe}</span>
+          <span className="hidden items-center gap-1 text-[10px] uppercase text-[#089981] sm:flex">
+            <Radio className="h-3 w-3" />
+            {provider || "market data"}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex h-8 rounded-md border border-border/70 bg-background/40 p-0.5">
-            <button
-              type="button"
-              title="Show Massive price candles"
-              onClick={() => setMode("price")}
-              className={`flex items-center gap-1.5 rounded px-2 text-xs transition-colors ${mode === "price" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <CandlestickChart className="h-3.5 w-3.5" />
-              Price
-            </button>
-            {linRegIndicator ? (
-              <button
-                type="button"
-                title="Show Linear Regression candles and signal"
-                onClick={() => setMode("linreg")}
-                className={`flex items-center gap-1.5 rounded px-2 text-xs transition-colors ${mode === "linreg" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                <LineChart className="h-3.5 w-3.5" />
-                LinReg
-              </button>
-            ) : null}
-          </div>
-          <div className="inline-flex h-8 rounded-md border border-border/70 bg-background/40 p-0.5">
-            {([20, 50, 100, "all"] as RangeOption[]).map((option) => (
-              <button
-                type="button"
-                key={option}
-                onClick={() => setRange(option)}
-                className={`min-w-8 rounded px-1.5 text-[11px] uppercase transition-colors ${range === option ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            title="Reset horizontal and vertical scales"
+            onClick={() => resetViewRef.current()}
+            className="rounded p-2 text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Toggle fullscreen chart"
+            onClick={toggleFullscreen}
+            className="rounded p-2 text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+          >
+            <Expand className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
-      <svg
-        role="img"
-        aria-label={`${symbol} ${mode === "linreg" ? "Linear Regression" : "price"} candlestick chart`}
-        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className="block aspect-[2.32/1] min-h-[270px] w-full touch-none"
-        onPointerMove={handlePointerMove}
-        onPointerLeave={() => setHoveredIndex(null)}
-      >
-        <rect width={CHART_WIDTH} height={CHART_HEIGHT} fill="#091014" />
-        {gridPrices.map((price) => {
-          const y = priceY(price);
-          return (
-            <g key={price}>
-              <line x1={PLOT_LEFT} x2={CHART_WIDTH - PLOT_RIGHT} y1={y} y2={y} stroke="#233039" strokeWidth="1" />
-              <text x={CHART_WIDTH - PLOT_RIGHT + 9} y={y + 4} fill="#81909b" fontSize="11" fontFamily="monospace">
-                {compactPrice(price)}
-              </text>
-            </g>
-          );
-        })}
-        {visible.map((candle, index) => {
-          const x = xAt(index);
-          const bullish = candle.close >= candle.open;
-          const color = bullish ? "#34d399" : "#fb7185";
-          const candleHigh = Math.max(candle.open, candle.high, candle.low, candle.close);
-          const candleLow = Math.min(candle.open, candle.high, candle.low, candle.close);
-          const bodyTop = priceY(Math.max(candle.open, candle.close));
-          const bodyBottom = priceY(Math.min(candle.open, candle.close));
-          const bodyHeight = Math.max(1.5, bodyBottom - bodyTop);
-          const volumeHeight = ((candle.volume || 0) / maxVolume) * (VOLUME_BOTTOM - VOLUME_TOP);
-          return (
-            <g key={candle.time} opacity={candle.is_closed === false ? 0.48 : 1}>
-              <line x1={x} x2={x} y1={priceY(candleHigh)} y2={priceY(candleLow)} stroke={color} strokeWidth="1.2" />
-              <rect x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={color} rx="0.7" />
-              <rect
-                x={x - candleWidth / 2}
-                y={VOLUME_BOTTOM - volumeHeight}
-                width={candleWidth}
-                height={volumeHeight}
-                fill={color}
-                opacity="0.26"
-              />
-            </g>
-          );
-        })}
-        {mode === "linreg" && signalPath ? (
-          <polyline points={signalPath} fill="none" stroke="#f8fafc" strokeWidth="1.8" strokeLinejoin="round" />
-        ) : null}
-        {hoveredIndex !== null ? (
-          <line
-            x1={xAt(selectedIndex)}
-            x2={xAt(selectedIndex)}
-            y1={PLOT_TOP}
-            y2={VOLUME_BOTTOM}
-            stroke="#91a0aa"
-            strokeDasharray="4 4"
-            opacity="0.65"
-          />
-        ) : null}
-        <line x1={PLOT_LEFT} x2={CHART_WIDTH - PLOT_RIGHT} y1={PRICE_BOTTOM + 7} y2={PRICE_BOTTOM + 7} stroke="#233039" />
-        {labelIndexes.map((index) => (
-          <text
-            key={visible[index].time}
-            x={xAt(index)}
-            y={CHART_HEIGHT - 18}
-            fill="#81909b"
-            fontSize="11"
-            fontFamily="monospace"
-            textAnchor={index === 0 ? "start" : index === visible.length - 1 ? "end" : "middle"}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#20232a] px-2 py-1.5">
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMode("price")}
+            className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "price" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
           >
-            {formatTime(visible[index].time, timeZone)}
-          </text>
-        ))}
-      </svg>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2 text-[10px] text-muted-foreground">
-        <div className="flex items-center gap-3">
-          <span><i className="mr-1 inline-block h-2 w-2 bg-emerald-400" />Up</span>
-          <span><i className="mr-1 inline-block h-2 w-2 bg-rose-400" />Down</span>
-          {mode === "linreg" ? <span><i className="mr-1 inline-block h-0.5 w-3 bg-white align-middle" />Signal</span> : null}
+            <CandlestickChart className="h-3.5 w-3.5" />
+            Candles
+          </button>
+          {regressionIndicator && regressionChannel ? (
+            <button
+              type="button"
+              onClick={() => setMode("regression")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "regression" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              Regression Channel [DW]
+            </button>
+          ) : null}
+          {trendIndicator && trendChannel ? (
+            <button
+              type="button"
+              onClick={() => setMode("trend")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "trend" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              Trend Channel
+            </button>
+          ) : null}
+          {linRegIndicator ? (
+            <button
+              type="button"
+              onClick={() => setMode("linreg")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "linreg" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              LinReg Candles
+            </button>
+          ) : null}
         </div>
+
+        <div className="flex items-center gap-1">
+          {([20, 50, 100, "all"] as RangeOption[]).map((option) => (
+            <button
+              type="button"
+              key={option}
+              onClick={() => setRange(option)}
+              className={`min-w-8 rounded px-1.5 py-1 text-[11px] uppercase ${range === option ? "bg-[#2a2e39] text-white" : "text-[#787b86] hover:text-white"}`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="min-h-10 border-b border-[#20232a] px-3 py-1.5 font-mono text-[11px]">
+        {selected ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-[#787b86]">{formatTime(selected.time, timeZone)}</span>
+            <span>O <b className="font-normal text-white">{formatPrice(selected.open, precision)}</b></span>
+            <span>H <b className="font-normal text-white">{formatPrice(selected.high, precision)}</b></span>
+            <span>L <b className="font-normal text-white">{formatPrice(selected.low, precision)}</b></span>
+            <span>C <b className={selected.close >= selected.open ? "font-normal text-[#089981]" : "font-normal text-[#f23645]"}>{formatPrice(selected.close, precision)}</b></span>
+            {selected.volume != null ? <span>Vol <b className="font-normal text-white">{compactVolume(selected.volume)}</b></span> : null}
+            {selectedRegression?.upper != null ? <span className="text-[#00e676]">Upper {formatPrice(selectedRegression.upper, precision)}</span> : null}
+            {selectedRegression?.q3 != null ? <span className="text-[#00c853]">Q3 {formatPrice(selectedRegression.q3, precision)}</span> : null}
+            {selectedRegression?.middle != null ? <span className="text-[#d1d4dc]">Middle {formatPrice(selectedRegression.middle, precision)}</span> : null}
+            {selectedRegression?.q1 != null ? <span className="text-[#ff5252]">Q1 {formatPrice(selectedRegression.q1, precision)}</span> : null}
+            {selectedRegression?.lower != null ? <span className="text-[#ff1744]">Lower {formatPrice(selectedRegression.lower, precision)}</span> : null}
+            {selectedTrend?.top != null ? <span style={{ color: TREND_TOP_COLOR }}>Top {formatPrice(selectedTrend.top, precision)}</span> : null}
+            {selectedTrend?.topZoneLower != null ? <span style={{ color: TREND_TOP_COLOR }}>Top Zone {formatPrice(selectedTrend.topZoneLower, precision)}</span> : null}
+            {selectedTrend?.middle != null ? <span style={{ color: TREND_CENTER_COLOR }}>Middle {formatPrice(selectedTrend.middle, precision)}</span> : null}
+            {selectedTrend?.bottomZoneUpper != null ? <span style={{ color: TREND_BOTTOM_COLOR }}>Bottom Zone {formatPrice(selectedTrend.bottomZoneUpper, precision)}</span> : null}
+            {selectedTrend?.bottom != null ? <span style={{ color: TREND_BOTTOM_COLOR }}>Bottom {formatPrice(selectedTrend.bottom, precision)}</span> : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div
+        ref={chartHostRef}
+        data-testid="trading-chart-canvas"
+        className="h-[560px] w-full bg-[#0b0e11]"
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
         <span>
-          {mode === "linreg"
-            ? `LR ${settings.lrLength} · ${settings.smaSignal ? "SMA" : "EMA"} ${settings.signalSmoothing} · completed bars only`
-            : `${visible.length} of ${candles.length} Massive OHLC bars`}
+          Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset
         </span>
+        <span>{timeZone} · completed bars only · {source.length} bars</span>
       </div>
     </div>
   );
