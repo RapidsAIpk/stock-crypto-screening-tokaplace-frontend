@@ -256,7 +256,7 @@ function LinRegEvidenceCard({ evidence }: { evidence: Record<string, unknown> })
 }
 
 function FriendlyIndicatorCard({ item, showTechnical }: { item: IndicatorDetail; showTechnical: boolean }) {
-  const evidence = item.evidence || null;
+  const evidence = item.evidence && !Array.isArray(item.evidence) ? item.evidence : null;
   const isLinReg = item.name === "linreg_candles" && evidence;
 
   if (isLinReg) {

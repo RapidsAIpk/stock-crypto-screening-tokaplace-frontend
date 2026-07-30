@@ -101,7 +101,7 @@ const ADX_FIELD_HELP_TEXT: Record<string, string> = {
   min_history: "Keep at least 200 candles for TradingView accuracy. Increase for extra margin.",
 };
 
-function fieldHelpText(indicatorName: IndicatorName, fieldKey: string): string | undefined {
+function baseFieldHelpText(indicatorName: IndicatorName, fieldKey: string): string | undefined {
   if (indicatorName === "relative_volume") {
     return RELATIVE_VOLUME_FIELD_HELP_TEXT[fieldKey] ?? FIELD_HELP_TEXT[fieldKey];
   }
@@ -271,7 +271,7 @@ export function IndicatorsFilter({
   };
 
   const isIndicatorFieldHidden = (ind: IndicatorConfig, fieldKey: string): boolean => {
-    if (isVlrFieldHidden(ind, fieldKey)) {
+    if (isFieldHidden(ind, fieldKey)) {
       return true;
     }
     return isChannelLineIndicatorFieldHidden(ind.name, ind.config, fieldKey);
@@ -285,7 +285,7 @@ export function IndicatorsFilter({
       const action = String(ind.config.action ?? "touch").trim().toLowerCase();
       return action === "touch" ? FIELD_HELP_TEXT.window_touch : FIELD_HELP_TEXT.window_close;
     }
-    return FIELD_HELP_TEXT[fieldKey];
+    return baseFieldHelpText(ind.name, fieldKey);
   };
 
   const updateTimeframe = (index: number, tf: IndicatorTimeframe) => {
@@ -455,24 +455,17 @@ export function IndicatorsFilter({
               {!isCollapsed && def && (
                 <div className="px-3 pb-3 pt-1">
                   <div className="grid grid-cols-2 gap-2">
-<<<<<<< HEAD
-                    {def.fields.map((field) => {
+                    {def.fields.map((field, fieldIndex) => {
                       if (isIndicatorFieldHidden(ind, field.key)) {
                         return null;
                       }
                       const helpText = fieldHelpText(ind, field.key);
-=======
-                    {def.fields.map((field, fieldIndex) => {
-                      if (isFieldHidden(ind, field.key)) {
-                        return null;
-                      }
                       const showSectionHeading =
                         field.section
                         && def.fields
                           .slice(0, fieldIndex)
-                          .filter((previous) => !isFieldHidden(ind, previous.key))
+                          .filter((previous) => !isIndicatorFieldHidden(ind, previous.key))
                           .every((previous) => previous.section !== field.section);
->>>>>>> fd610e871af958947ea2d5fe864f56c2faaec095
                       return (
                       <div key={field.key} className={field.section ? "contents" : "contents"}>
                       {showSectionHeading && (
@@ -484,13 +477,8 @@ export function IndicatorsFilter({
                         className={`space-y-1 ${field.type === "area-list" || field.type === "condition-list" ? "col-span-2" : ""}`}
                       >
                         <div className="text-[10px] text-muted-foreground">{field.label}</div>
-<<<<<<< HEAD
                         {helpText && (
                           <div className="text-[9px] text-muted-foreground/80">{helpText}</div>
-=======
-                        {fieldHelpText(ind.name, field.key) && (
-                          <div className="text-[9px] text-muted-foreground/80">{fieldHelpText(ind.name, field.key)}</div>
->>>>>>> fd610e871af958947ea2d5fe864f56c2faaec095
                         )}
                         {field.type === "number" && (
                           <input

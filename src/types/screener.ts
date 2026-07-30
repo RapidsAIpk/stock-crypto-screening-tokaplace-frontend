@@ -1704,21 +1704,11 @@ export function normalizeDeadAssetsFilter(
 
 export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorConfig {
   const defaults = getDefaultIndicatorConfig(indicator.name);
-<<<<<<< HEAD
-  const merged = {
-    ...defaults,
-    ...(indicator.config ?? {}),
-  };
-
-  return {
-    ...indicator,
-    config: normalizeConfirmationConfig(merged) as IndicatorConfig["config"],
-=======
   const rawConfig = indicator.config ?? {};
-  const config = {
+  const config = normalizeConfirmationConfig({
     ...defaults,
     ...rawConfig,
-  };
+  });
 
   if (indicator.name === "volume") {
     if (rawConfig.vol_x == null && rawConfig.multiplier != null) {
@@ -1760,8 +1750,7 @@ export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorC
 
   return {
     ...indicator,
-    config,
->>>>>>> fd610e871af958947ea2d5fe864f56c2faaec095
+    config: config as IndicatorConfig["config"],
   };
 }
 
