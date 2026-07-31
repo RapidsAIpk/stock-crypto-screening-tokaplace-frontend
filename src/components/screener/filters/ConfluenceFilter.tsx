@@ -1,37 +1,74 @@
 import {
+  CONFLUENCE_UI_SIGNAL_TYPES,
   createConfluenceSource,
+  describeConfluenceSelectionConstraint,
   formatConfluenceSelectionLabel,
-  getConfluenceSelectionOptions,
+  getAllowedConfluenceSelections,
   getDefaultChannelLength,
   getDefaultConfluenceConfig,
   getDefaultConfluenceSelection,
+  getMinimumConfluenceSourceLength,
+  isConfluenceUiSignalType,
   normalizeConfluenceConfig,
+  sanitizeConfluenceUiConfig,
+  wouldDuplicateConfluenceSource,
 } from "@/types/screener";
 import type { ChannelType, Confluence } from "@/types/screener";
+import { FieldLabel, FilterToggle } from "./FilterUi";
+import { useEffect, useMemo } from "react";
 
 interface Props {
   value: Confluence | null;
   onChange: (v: Confluence | null) => void;
 }
 
-const TYPES = ["bullish", "bearish", "breakout", "any"] as const;
 const CHANNELS: ChannelType[] = ["lrc", "regression", "trend"];
-const TYPE_LABELS: Record<(typeof TYPES)[number], string> = {
+const TYPE_LABELS: Record<(typeof CONFLUENCE_UI_SIGNAL_TYPES)[number], string> = {
   bullish: "Bullish",
   bearish: "Bearish",
   breakout: "Breakout",
-  any: "Any",
 };
-const TYPE_HELPERS: Record<(typeof TYPES)[number], string> = {
-  bullish: "Dual support logic across exactly two selected lines or zones.",
-  bearish: "Dual resistance logic across exactly two selected lines or zones.",
-  breakout: "Sequential support or resistance transitions across source 1 then source 2.",
-  any: "Match any bullish, bearish, or breakout confluence scenario.",
+const TYPE_HELPERS: Record<(typeof CONFLUENCE_UI_SIGNAL_TYPES)[number], string> = {
+  bullish: "Dual support across two different channel supports.",
+  bearish: "Dual resistance across two different channel resistances.",
+  breakout: "Resistance break or support-then-break sequence across two sources.",
 };
 
+const inputClass =
+  "w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground";
+const chipClass = (active: boolean, disabled = false) =>
+  `rounded-md border px-2.5 py-1.5 text-xs capitalize transition-colors ${
+    disabled
+      ? "cursor-not-allowed border-border/50 text-muted-foreground/50"
+      : active
+        ? "border-primary bg-primary/10 text-accent-foreground"
+        : "border-border text-muted-foreground"
+  }`;
+
 export function ConfluenceFilter({ value, onChange }: Props) {
-  const current = normalizeConfluenceConfig(value);
+  const normalized = useMemo(() => normalizeConfluenceConfig(value), [value]);
+  const current = useMemo(
+    () => (normalized ? sanitizeConfluenceUiConfig(normalized) : null),
+    [normalized],
+  );
   const enabled = current !== null;
+
+  useEffect(() => {
+    if (!normalized || !current) {
+      return;
+    }
+    if (JSON.stringify(normalized) !== JSON.stringify(current)) {
+      onChange(current);
+    }
+  }, [current, normalized, onChange]);
+
+  const applyConfig = (next: Confluence | null) => {
+    if (!next) {
+      onChange(null);
+      return;
+    }
+    onChange(sanitizeConfluenceUiConfig(next));
+  };
 
   const toggle = () => {
     if (enabled) {
@@ -40,12 +77,12 @@ export function ConfluenceFilter({ value, onChange }: Props) {
     }
 
     const defaults = getDefaultConfluenceConfig();
-    const type = defaults.type;
+    const type = isConfluenceUiSignalType(defaults.type) ? defaults.type : "bullish";
     const sources = defaults.source_channel_types.map((channelType, index) =>
       createConfluenceSource(channelType, {}, index, type),
     );
 
-    onChange({
+    applyConfig({
       type,
       channels: sources.map((source) => source.channel_type),
       sources,
@@ -57,10 +94,10 @@ export function ConfluenceFilter({ value, onChange }: Props) {
 
   const update = (patch: Partial<Confluence>) => {
     if (!current) return;
-    onChange(normalizeConfluenceConfig({ ...current, ...patch }));
+    applyConfig({ ...current, ...patch });
   };
 
-  const updateType = (type: (typeof TYPES)[number]) => {
+  const updateType = (type: (typeof CONFLUENCE_UI_SIGNAL_TYPES)[number]) => {
     if (!current) return;
 
     const nextSources = (current.sources ?? []).map((source, index) =>
@@ -75,14 +112,12 @@ export function ConfluenceFilter({ value, onChange }: Props) {
       ),
     );
 
-    onChange(
-      normalizeConfluenceConfig({
-        ...current,
-        type,
-        sources: nextSources,
-        channels: nextSources.map((source) => source.channel_type),
-      }),
-    );
+    applyConfig({
+      ...current,
+      type,
+      sources: nextSources,
+      channels: nextSources.map((source) => source.channel_type),
+    });
   };
 
   const updateSources = (
@@ -100,7 +135,8 @@ export function ConfluenceFilter({ value, onChange }: Props) {
     id: string,
     patch: Partial<NonNullable<Confluence["sources"]>[number]>,
   ) => {
-    if (!current) return;
+    if (!current || !isConfluenceUiSignalType(current.type)) return;
+    const confluenceType = current.type;
 
     updateSources((sources) =>
       sources.map((source, index) => {
@@ -113,18 +149,28 @@ export function ConfluenceFilter({ value, onChange }: Props) {
           patch.selection
           ?? (
             patch.channel_type && patch.channel_type !== source.channel_type
-              ? getDefaultConfluenceSelection(nextChannelType, current.type, index)
+              ? getDefaultConfluenceSelection(nextChannelType, confluenceType, index)
               : source.selection
           );
-        const nextLength =
-          patch.channel_type && patch.channel_type !== source.channel_type
-            ? getDefaultChannelLength(nextChannelType)
-            : Math.max(
-                2,
-                Number(patch.length ?? source.length) || getDefaultChannelLength(nextChannelType),
-              );
+        const defaultLength = getDefaultChannelLength(nextChannelType);
+        const requestedLength = Math.max(
+          2,
+          Number(patch.length ?? source.length) || defaultLength,
+        );
+        const nextLength = Math.max(
+          getMinimumConfluenceSourceLength(
+            sources.map((item, itemIndex) => (
+              itemIndex === index
+                ? { ...item, channel_type: nextChannelType }
+                : item
+            )),
+            index,
+            nextChannelType,
+          ),
+          requestedLength,
+        );
 
-        return createConfluenceSource(
+        const candidate = createConfluenceSource(
           nextChannelType,
           {
             ...source,
@@ -134,141 +180,179 @@ export function ConfluenceFilter({ value, onChange }: Props) {
             length: nextLength,
           },
           index,
-          current.type,
+          confluenceType,
         );
+
+        if (wouldDuplicateConfluenceSource(sources, index, candidate)) {
+          return createConfluenceSource(
+            nextChannelType,
+            {
+              ...candidate,
+              length: getMinimumConfluenceSourceLength(sources, index, nextChannelType),
+              selection: getAllowedConfluenceSelections(confluenceType, nextChannelType, index)
+                .find((selection) => !wouldDuplicateConfluenceSource(sources, index, {
+                  ...candidate,
+                  selection,
+                }))
+                ?? getDefaultConfluenceSelection(nextChannelType, confluenceType, index),
+            },
+            index,
+            confluenceType,
+          );
+        }
+
+        return candidate;
       }),
     );
   };
 
+  const signalType = isConfluenceUiSignalType(current?.type) ? current.type : "bullish";
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={toggle}
-          className={`h-4 w-4 rounded border transition-colors ${enabled ? "bg-primary border-primary" : "border-border"}`}
-        />
-        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Channel Confluence</label>
-      </div>
+      <FilterToggle
+        enabled={enabled}
+        onToggle={toggle}
+        label="Channel Confluence"
+        info="Detects when price respects two channel lines or zones in sequence — useful for support/resistance confluence setups."
+      />
       {enabled && current && (
-        <div className="space-y-2 pl-6">
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Signal Type</div>
-            <div className="flex flex-wrap gap-1">
-              {TYPES.map((type) => (
+        <div className="space-y-3 pl-7">
+          <div className="space-y-1.5">
+            <FieldLabel info={TYPE_HELPERS[signalType]}>Signal Type</FieldLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {CONFLUENCE_UI_SIGNAL_TYPES.map((type) => (
                 <button
                   key={type}
+                  type="button"
                   onClick={() => updateType(type)}
-                  className={`px-2 py-0.5 rounded text-[10px] border capitalize transition-colors ${
-                    current.type === type
-                      ? "border-primary bg-primary/10 text-accent-foreground"
-                      : "border-border text-muted-foreground"
-                  }`}
+                  className={chipClass(current.type === type)}
                 >
                   {TYPE_LABELS[type]}
                 </button>
               ))}
             </div>
-            <div className="text-[10px] text-muted-foreground/80">
-              {TYPE_HELPERS[current.type]}
-            </div>
           </div>
 
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">
-              Exactly 2 selected lines or zones. Source order matters for step 1 then step 2 logic.
-            </div>
+          <div className="space-y-1.5">
+            <FieldLabel info="Exactly 2 selected lines or zones. Source order matters for step 1 then step 2 logic.">
+              Sources
+            </FieldLabel>
 
             <div className="space-y-2">
-              {(current.sources ?? []).map((source, index) => (
-                <div
-                  key={source.id}
-                  className="grid grid-cols-[1fr_1fr_92px] gap-2 rounded border border-border/70 p-2"
-                >
-                  <div className="space-y-1">
-                    <div className="text-[10px] text-muted-foreground">Source {index + 1} Indicator</div>
-                    <select
-                      value={source.channel_type}
-                      onChange={(e) =>
-                        updateSource(source.id, {
-                          channel_type: e.target.value as ChannelType,
-                        })
-                      }
-                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-                    >
-                      {CHANNELS.map((channel) => (
-                        <option key={channel} value={channel}>
-                          {channel === "lrc"
-                            ? "LRC"
-                            : channel === "regression"
-                              ? "Regression Channel"
-                              : "Trend Channel"}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+              {(current.sources ?? []).map((source, index) => {
+                const allowedSelections = getAllowedConfluenceSelections(
+                  signalType,
+                  source.channel_type,
+                  index,
+                );
+                const minLength = getMinimumConfluenceSourceLength(
+                  current.sources ?? [],
+                  index,
+                  source.channel_type,
+                );
 
-                  <div className="space-y-1">
-                    <div className="text-[10px] text-muted-foreground">Line / Zone</div>
-                    <select
-                      value={source.selection}
-                      onChange={(e) =>
-                        updateSource(source.id, {
-                          selection: e.target.value as NonNullable<Confluence["sources"]>[number]["selection"],
-                        })
-                      }
-                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs capitalize text-foreground"
-                    >
-                      {getConfluenceSelectionOptions(source.channel_type).map((selection) => (
-                        <option key={selection} value={selection}>
-                          {formatConfluenceSelectionLabel(selection)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                return (
+                  <div
+                    key={source.id}
+                    className="space-y-2 rounded-md border border-border/70 p-2.5"
+                  >
+                    <div className="grid grid-cols-[1fr_1fr_92px] gap-2">
+                      <div className="space-y-1.5">
+                        <FieldLabel>Source {index + 1} Indicator</FieldLabel>
+                        <select
+                          value={source.channel_type}
+                          onChange={(e) =>
+                            updateSource(source.id, {
+                              channel_type: e.target.value as ChannelType,
+                            })
+                          }
+                          className={inputClass}
+                        >
+                          {CHANNELS.map((channel) => (
+                            <option key={channel} value={channel}>
+                              {channel === "lrc"
+                                ? "LRC"
+                                : channel === "regression"
+                                  ? "Regression Channel"
+                                  : "Trend Channel"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                  <div className="space-y-1">
-                    <div className="text-[10px] text-muted-foreground">Length</div>
-                    <input
-                      type="number"
-                      min="2"
-                      value={source.length}
-                      onChange={(e) =>
-                        updateSource(source.id, {
-                          length: Math.max(
-                            2,
-                            Number(e.target.value) || getDefaultChannelLength(source.channel_type),
-                          ),
-                        })
-                      }
-                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-                    />
-                  </div>
+                      <div className="space-y-1.5">
+                        <FieldLabel>Line / Zone</FieldLabel>
+                        <select
+                          value={source.selection}
+                          onChange={(e) =>
+                            updateSource(source.id, {
+                              selection: e.target.value as NonNullable<Confluence["sources"]>[number]["selection"],
+                            })
+                          }
+                          className={`${inputClass} capitalize`}
+                        >
+                          {allowedSelections.map((selection) => {
+                            const disabled = wouldDuplicateConfluenceSource(
+                              current.sources ?? [],
+                              index,
+                              { selection },
+                            );
+                            return (
+                              <option key={selection} value={selection} disabled={disabled}>
+                                {formatConfluenceSelectionLabel(selection)}
+                                {disabled ? " (same as other source)" : ""}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
 
-                  <div className="col-span-3 text-[10px] text-muted-foreground/80">
-                    Source {index + 1} uses{" "}
-                    {source.channel_type === "lrc"
-                      ? "LRC"
-                      : source.channel_type === "regression"
-                        ? "Regression Channel"
-                        : "Trend Channel"}{" "}
-                    on {formatConfluenceSelectionLabel(source.selection)} with length {source.length}.
+                      <div className="space-y-1.5">
+                        <FieldLabel>Length</FieldLabel>
+                        <input
+                          type="number"
+                          min={minLength}
+                          value={source.length}
+                          onChange={(e) =>
+                            updateSource(source.id, {
+                              length: Math.max(
+                                minLength,
+                                Number(e.target.value) || getDefaultChannelLength(source.channel_type),
+                              ),
+                            })
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] leading-4 text-muted-foreground">
+                      {describeConfluenceSelectionConstraint(signalType, index)}
+                      {index === 1 && minLength > 2
+                        ? ` Minimum length here is ${minLength} because Source 1 uses the same channel type.`
+                        : ""}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
+              type="button"
               onClick={() => update({ liquidity_sweep: !current.liquidity_sweep })}
-              className={`h-3.5 w-3.5 rounded border transition-colors ${current.liquidity_sweep ? "bg-primary border-primary" : "border-border"}`}
+              className={`h-4 w-4 rounded border transition-colors ${current.liquidity_sweep ? "bg-primary border-primary" : "border-border"}`}
             />
-            <span className="text-[10px] text-muted-foreground">Require liquidity sweep</span>
+            <FieldLabel info="Requires price to sweep liquidity beyond the line before confirming confluence.">
+              Require liquidity sweep
+            </FieldLabel>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <div className="text-[10px] text-muted-foreground">Lookback Candles</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <FieldLabel>Lookback Candles</FieldLabel>
               <input
                 type="number"
                 min="1"
@@ -282,18 +366,18 @@ export function ConfluenceFilter({ value, onChange }: Props) {
                     ),
                   })
                 }
-                className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                className={inputClass}
               />
             </div>
-            <div className="space-y-1">
-              <div className="text-[10px] text-muted-foreground">Tolerance %</div>
+            <div className="space-y-1.5">
+              <FieldLabel>Tolerance %</FieldLabel>
               <input
                 type="number"
                 min="0"
                 step="0.01"
                 value={current.tolerance_pct}
                 onChange={(e) => update({ tolerance_pct: Number(e.target.value) || 0 })}
-                className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                className={inputClass}
               />
             </div>
           </div>

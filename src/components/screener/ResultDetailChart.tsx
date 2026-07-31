@@ -12,15 +12,21 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { IndicatorDetail, MarketCandle } from "@/types/screener";
+import type { FilterDetail, IndicatorDetail, MarketCandle } from "@/types/screener";
 import {
   createLinearRegressionCandles,
+  normalizeConfluenceChartSources,
+  normalizeLrcChannel,
   normalizeMarketCandles,
   normalizeRegressionChannel,
   normalizeTrendChannel,
   regressionValueAt,
+  resolveConfluenceHighlightTimes,
+  resolveChannelRespectHighlightTimes,
+  resolveChartChannelVisibility,
   trendValueAt,
   type ChartCandle,
+  type ConfluenceChartSource,
   type LinRegSettings,
   type RegressionChannelLine,
 } from "./resultDetailChartData";
@@ -33,13 +39,16 @@ import {
   TV_BACKGROUND,
 } from "./trendChannelChartStyles";
 
-type ChartMode = "price" | "regression" | "trend" | "linreg";
+type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg";
 type RangeOption = 20 | 50 | 100 | "all";
 
 interface Props {
   candles: Array<MarketCandle | Record<string, unknown>>;
   indicatorDetails: IndicatorDetail[];
+  filterDetails?: FilterDetail[];
   channels: Record<string, unknown>;
+  confluenceChannels?: Record<string, unknown>;
+  requestFilters?: Record<string, unknown> | null;
   symbol: string;
   timeframe: string;
   timeZone: string;
@@ -52,6 +61,19 @@ const TV_TEXT = "#b2b5be";
 const TV_BORDER = "#2a2e39";
 const UP_COLOR = "#089981";
 const DOWN_COLOR = "#f23645";
+const FILTER_CANDLE_OUTLINE = "#00e5ff";
+const CONFLUENCE_SOURCE_COLORS = ["#a78bfa", "#f59e0b"] as const;
+
+function confluenceValueAt(
+  source: ConfluenceChartSource,
+  line: "lower" | "upper" | "mid",
+  candleIndex: number,
+  candleCount: number,
+): number | null {
+  const sourceIndex = candleIndex - (candleCount - source.length);
+  if (sourceIndex < 0 || sourceIndex >= source.length) return null;
+  return source[line][sourceIndex] ?? null;
+}
 
 function positiveInteger(value: unknown, fallback: number): number {
   const parsed = Math.trunc(Number(value));
@@ -113,20 +135,27 @@ function linRegSettings(indicator: IndicatorDetail): LinRegSettings {
   };
 }
 
-function toCandleData(candles: ChartCandle[]): CandlestickData<UTCTimestamp>[] {
+function toCandleData(
+  candles: ChartCandle[],
+  highlightedTimes: Set<number> = new Set(),
+): CandlestickData<UTCTimestamp>[] {
   return candles.map((candle) => ({
     time: candle.time as UTCTimestamp,
     open: candle.open,
     high: candle.high,
     low: candle.low,
     close: candle.close,
+    ...(highlightedTimes.has(candle.time) ? { borderColor: FILTER_CANDLE_OUTLINE } : {}),
   }));
 }
 
 export function ResultDetailChart({
   candles: rawCandles,
   indicatorDetails,
+  filterDetails = [],
   channels,
+  confluenceChannels = {},
+  requestFilters,
   symbol,
   timeframe,
   timeZone,
@@ -140,11 +169,22 @@ export function ResultDetailChart({
     () => candles.filter((candle) => candle.is_closed !== false),
     [candles],
   );
+  const lrcChannel = useMemo(() => normalizeLrcChannel(channels), [channels]);
   const regressionChannel = useMemo(() => normalizeRegressionChannel(channels), [channels]);
   const trendChannel = useMemo(() => normalizeTrendChannel(channels), [channels]);
-  const regressionIndicator = indicatorDetails.find((item) => item.name === "regression");
-  const trendIndicator = indicatorDetails.find((item) => item.name === "trend");
+  const confluenceSources = useMemo(
+    () => normalizeConfluenceChartSources(confluenceChannels, requestFilters),
+    [confluenceChannels, requestFilters],
+  );
+  const showConfluenceChart = confluenceSources.length === 2;
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
+  const channelVisibility = useMemo(
+    () => resolveChartChannelVisibility(indicatorDetails, requestFilters),
+    [indicatorDetails, requestFilters],
+  );
+  const showLrcChart = channelVisibility.lrc && Boolean(lrcChannel);
+  const showRegressionChart = channelVisibility.regression && Boolean(regressionChannel);
+  const showTrendChart = channelVisibility.trend && Boolean(trendChannel);
   const settings = useMemo(
     () => linRegSettings(linRegIndicator || { name: "linreg_candles", passed: false, config: {} }),
     [linRegIndicator],
@@ -153,10 +193,29 @@ export function ResultDetailChart({
     () => createLinearRegressionCandles(completedCandles, settings),
     [completedCandles, settings],
   );
-  const initialMode: ChartMode = regressionIndicator && regressionChannel
-    ? "regression"
-    : trendIndicator && trendChannel
-      ? "trend"
+  const requestedChannelType = String(
+    (requestFilters?.channel_respect as Record<string, unknown> | undefined)?.channel_type || "",
+  ).trim().toLowerCase();
+  const requestedChannelMode: ChartMode | null = (
+    requestedChannelType === "lrc"
+    || requestedChannelType === "regression"
+    || requestedChannelType === "trend"
+  ) ? requestedChannelType : null;
+  const requestedChannelAvailable = (
+    (requestedChannelMode === "lrc" && showLrcChart)
+    || (requestedChannelMode === "regression" && showRegressionChart)
+    || (requestedChannelMode === "trend" && showTrendChart)
+  );
+  const initialMode: ChartMode = requestedChannelMode && requestedChannelAvailable
+    ? requestedChannelMode
+    : showConfluenceChart
+      ? "confluence"
+    : showLrcChart
+      ? "lrc"
+      : showRegressionChart
+        ? "regression"
+        : showTrendChart
+          ? "trend"
       : linRegIndicator
         ? "linreg"
         : "price";
@@ -169,8 +228,10 @@ export function ResultDetailChart({
   useEffect(() => {
     const modeAvailable = (
       mode === "price"
-      || (mode === "regression" && Boolean(regressionIndicator && regressionChannel))
-      || (mode === "trend" && Boolean(trendIndicator && trendChannel))
+      || (mode === "confluence" && showConfluenceChart)
+      || (mode === "lrc" && showLrcChart)
+      || (mode === "regression" && showRegressionChart)
+      || (mode === "trend" && showTrendChart)
       || (mode === "linreg" && Boolean(linRegIndicator))
     );
     if (!modeAvailable) setMode(initialMode);
@@ -178,15 +239,26 @@ export function ResultDetailChart({
     initialMode,
     linRegIndicator,
     mode,
-    regressionChannel,
-    regressionIndicator,
-    trendChannel,
-    trendIndicator,
+    showConfluenceChart,
+    showLrcChart,
+    showRegressionChart,
+    showTrendChart,
   ]);
 
   const source: ChartCandle[] = mode === "linreg" && linRegIndicator
     ? linRegCandles
     : completedCandles;
+  const channelRespectHighlightTimes = useMemo(
+    () => resolveChannelRespectHighlightTimes(filterDetails, requestFilters, mode),
+    [filterDetails, mode, requestFilters],
+  );
+  const confluenceHighlightTimes = useMemo(
+    () => resolveConfluenceHighlightTimes(filterDetails),
+    [filterDetails],
+  );
+  const highlightedTimes = mode === "confluence"
+    ? confluenceHighlightTimes
+    : channelRespectHighlightTimes;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
@@ -201,6 +273,7 @@ export function ResultDetailChart({
         middle: regressionValueAt(regressionChannel, "middle", selectedIndex, source.length),
         q1: regressionValueAt(regressionChannel, "q1", selectedIndex, source.length),
         lower: regressionValueAt(regressionChannel, "lower", selectedIndex, source.length),
+        tracer: regressionValueAt(regressionChannel, "tracer", selectedIndex, source.length),
       }
     : null;
   const selectedTrend = mode === "trend" && trendChannel && selected
@@ -222,6 +295,14 @@ export function ResultDetailChart({
         bottom: trendValueAt(trendChannel, "bottom", selectedIndex, source.length),
       }
     : null;
+  const selectedConfluence = mode === "confluence" && selected
+    ? confluenceSources.map((confluenceSource) => ({
+        source: confluenceSource,
+        lower: confluenceValueAt(confluenceSource, "lower", selectedIndex, source.length),
+        mid: confluenceValueAt(confluenceSource, "mid", selectedIndex, source.length),
+        upper: confluenceValueAt(confluenceSource, "upper", selectedIndex, source.length),
+      }))
+    : [];
 
   useEffect(() => {
     const host = chartHostRef.current;
@@ -313,6 +394,7 @@ export function ResultDetailChart({
       borderDownColor: DOWN_COLOR,
       wickUpColor: UP_COLOR,
       wickDownColor: DOWN_COLOR,
+      borderVisible: true,
       priceFormat: {
         type: "price",
         precision,
@@ -322,7 +404,7 @@ export function ResultDetailChart({
       priceLineColor: DOWN_COLOR,
       lastValueVisible: true,
     });
-    candleSeries.setData(toCandleData(source));
+    candleSeries.setData(toCandleData(source, highlightedTimes));
 
     const addLine = (
       color: string,
@@ -347,24 +429,55 @@ export function ResultDetailChart({
       series.setData(data);
     };
 
-    if (mode === "regression" && regressionChannel) {
+    const activeRegressionChannel = mode === "lrc" ? lrcChannel : regressionChannel;
+    if ((mode === "lrc" || mode === "regression") && activeRegressionChannel) {
       const lineData = (line: RegressionChannelLine): LineData<UTCTimestamp>[] => (
         source.flatMap((candle, candleIndex) => {
-          const value = regressionValueAt(regressionChannel, line, candleIndex, source.length);
+          const value = regressionValueAt(activeRegressionChannel, line, candleIndex, source.length);
           return value === null ? [] : [{ time: candle.time as UTCTimestamp, value }];
         })
       );
+      const firstMiddle = activeRegressionChannel.middle.find((value) => value !== null);
+      const lastMiddle = [...activeRegressionChannel.middle].reverse().find((value) => value !== null);
+      const regressionColor = (
+        firstMiddle !== undefined
+        && lastMiddle !== undefined
+        && lastMiddle !== firstMiddle
+      ) ? (lastMiddle > firstMiddle ? "#00ff00" : "#ff0000") : "#cccccc";
+
       addLine("#00e676", 2, LineStyle.Solid, lineData("upper"), true);
-      addLine("#00c853", 1, LineStyle.Dashed, lineData("q3"));
-      addLine("#d1d4dc", 2, LineStyle.Solid, lineData("middle"), true);
-      addLine("#ff5252", 1, LineStyle.Dashed, lineData("q1"));
+      if (mode === "regression") addLine("#00c853", 1, LineStyle.Dashed, lineData("q3"));
+      addLine(regressionColor, 2, LineStyle.Solid, lineData("middle"), true);
+      if (mode === "regression") addLine("#ff5252", 1, LineStyle.Dashed, lineData("q1"));
       addLine("#ff1744", 2, LineStyle.Solid, lineData("lower"), true);
+      if (mode === "regression") addLine("#ffffff", 1, LineStyle.Solid, lineData("tracer"));
     }
 
     if (mode === "trend" && trendChannel) {
       addLine(TREND_TOP_COLOR, 2, LineStyle.Solid, buildTrendLineData(source, trendChannel, "top"), true);
       addLine(TREND_CENTER_COLOR, 2, LineStyle.Dashed, buildTrendLineData(source, trendChannel, "middle"), true);
       addLine(TREND_BOTTOM_COLOR, 2, LineStyle.Solid, buildTrendLineData(source, trendChannel, "bottom"), true);
+    }
+
+    if (mode === "confluence") {
+      const sourceLineData = (
+        confluenceSource: ConfluenceChartSource,
+        line: "lower" | "upper" | "mid",
+      ): LineData<UTCTimestamp>[] => source.flatMap((candle, candleIndex) => {
+        const value = confluenceValueAt(confluenceSource, line, candleIndex, source.length);
+        return value === null ? [] : [{ time: candle.time as UTCTimestamp, value }];
+      });
+
+      confluenceSources.forEach((confluenceSource, index) => {
+        const color = CONFLUENCE_SOURCE_COLORS[index] ?? CONFLUENCE_SOURCE_COLORS[0];
+        if (confluenceSource.isZone) {
+          addLine(color, 1, LineStyle.Dashed, sourceLineData(confluenceSource, "lower"));
+          addLine(color, 1, LineStyle.Dashed, sourceLineData(confluenceSource, "upper"));
+          addLine(color, 2, LineStyle.Solid, sourceLineData(confluenceSource, "mid"), true);
+        } else {
+          addLine(color, 2, LineStyle.Solid, sourceLineData(confluenceSource, "mid"), true);
+        }
+      });
     }
 
     if (mode === "linreg") {
@@ -407,7 +520,7 @@ export function ResultDetailChart({
       resetViewRef.current = () => undefined;
       chart.remove();
     };
-  }, [mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
+  }, [confluenceSources, highlightedTimes, lrcChannel, mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
 
   if (!completedCandles.length) {
     return (
@@ -475,7 +588,27 @@ export function ResultDetailChart({
             <CandlestickChart className="h-3.5 w-3.5" />
             Candles
           </button>
-          {regressionIndicator && regressionChannel ? (
+          {showConfluenceChart ? (
+            <button
+              type="button"
+              onClick={() => setMode("confluence")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "confluence" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              Channel Confluence
+            </button>
+          ) : null}
+          {showLrcChart ? (
+            <button
+              type="button"
+              onClick={() => setMode("lrc")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "lrc" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              Linear Regression Channel
+            </button>
+          ) : null}
+          {showRegressionChart ? (
             <button
               type="button"
               onClick={() => setMode("regression")}
@@ -485,7 +618,7 @@ export function ResultDetailChart({
               Regression Channel [DW]
             </button>
           ) : null}
-          {trendIndicator && trendChannel ? (
+          {showTrendChart ? (
             <button
               type="button"
               onClick={() => setMode("trend")}
@@ -521,6 +654,20 @@ export function ResultDetailChart({
         </div>
       </div>
 
+      {mode === "confluence" ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#20232a] bg-[#0d1014] px-3 py-2 text-[11px]">
+          {confluenceSources.map((confluenceSource, index) => (
+            <span
+              key={confluenceSource.sourceId}
+              className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1"
+              style={{ color: CONFLUENCE_SOURCE_COLORS[index] }}
+            >
+              Source {index + 1}: {confluenceSource.channelType.toUpperCase()} · {confluenceSource.selection.replace(/_/g, " ")} · {confluenceSource.length} bars
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <div className="min-h-10 border-b border-[#20232a] px-3 py-1.5 font-mono text-[11px]">
         {selected ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -535,11 +682,24 @@ export function ResultDetailChart({
             {selectedRegression?.middle != null ? <span className="text-[#d1d4dc]">Middle {formatPrice(selectedRegression.middle, precision)}</span> : null}
             {selectedRegression?.q1 != null ? <span className="text-[#ff5252]">Q1 {formatPrice(selectedRegression.q1, precision)}</span> : null}
             {selectedRegression?.lower != null ? <span className="text-[#ff1744]">Lower {formatPrice(selectedRegression.lower, precision)}</span> : null}
+            {selectedRegression?.tracer != null ? <span className="text-white">Tracer {formatPrice(selectedRegression.tracer, precision)}</span> : null}
             {selectedTrend?.top != null ? <span style={{ color: TREND_TOP_COLOR }}>Top {formatPrice(selectedTrend.top, precision)}</span> : null}
             {selectedTrend?.topZoneLower != null ? <span style={{ color: TREND_TOP_COLOR }}>Top Zone {formatPrice(selectedTrend.topZoneLower, precision)}</span> : null}
             {selectedTrend?.middle != null ? <span style={{ color: TREND_CENTER_COLOR }}>Middle {formatPrice(selectedTrend.middle, precision)}</span> : null}
             {selectedTrend?.bottomZoneUpper != null ? <span style={{ color: TREND_BOTTOM_COLOR }}>Bottom Zone {formatPrice(selectedTrend.bottomZoneUpper, precision)}</span> : null}
             {selectedTrend?.bottom != null ? <span style={{ color: TREND_BOTTOM_COLOR }}>Bottom {formatPrice(selectedTrend.bottom, precision)}</span> : null}
+            {selectedConfluence.map(({ source: confluenceSource, lower, mid, upper }, index) => {
+              const value = mid ?? lower ?? upper;
+              if (value == null) return null;
+              return (
+                <span key={confluenceSource.sourceId} style={{ color: CONFLUENCE_SOURCE_COLORS[index] }}>
+                  S{index + 1} {confluenceSource.selection.replace(/_/g, " ")} {formatPrice(value, precision)}
+                  {confluenceSource.isZone && lower !== null && upper !== null
+                    ? ` [${formatPrice(lower, precision)}–${formatPrice(upper, precision)}]`
+                    : ""}
+                </span>
+              );
+            })}
           </div>
         ) : null}
       </div>
@@ -554,7 +714,15 @@ export function ResultDetailChart({
         <span>
           Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset
         </span>
-        <span>{timeZone} · completed bars only · {source.length} bars</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {highlightedTimes.size ? (
+            <span className="flex items-center gap-1.5 text-[#9ca3af]">
+              <span className="h-2.5 w-2.5 border-2 border-[#00e5ff]" />
+              Cyan outline = candle matched by {mode === "confluence" ? "Confluence" : "Channel Respect"}
+            </span>
+          ) : null}
+          <span>{timeZone} · completed bars only · {source.length} bars</span>
+        </div>
       </div>
     </div>
   );

@@ -501,7 +501,10 @@ export function ResultDetailPanel({ result, detail, loading = false, error = "",
             key={`${active.symbol}-${active.timeframe}`}
             candles={marketData?.recent_candles || []}
             indicatorDetails={indicatorDetails}
+            filterDetails={filterDetails}
             channels={detail.channels}
+            confluenceChannels={detail.confluence_channels}
+            requestFilters={detail.request_filters}
             symbol={active.symbol}
             timeframe={active.timeframe}
             timeZone={timeZone}

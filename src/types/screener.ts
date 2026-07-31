@@ -1767,6 +1767,78 @@ export function getDefaultChannelLength(channelType: ChannelType): number {
   }
 }
 
+export const SCREENING_MAX_CANDLES = 500;
+
+export function resolveChannelRespectChannelLength(
+  channelType: ChannelType,
+  indicators: IndicatorConfig[] = [],
+): number {
+  const matchingIndicator = indicators.find((indicator) => indicator.name === channelType);
+  const configuredLength = Number(matchingIndicator?.config?.length);
+  if (Number.isFinite(configuredLength) && configuredLength > 0) {
+    return Math.trunc(configuredLength);
+  }
+  return getDefaultChannelLength(channelType);
+}
+
+export function getChannelRespectHistoryCandleCount(
+  channelType: ChannelType,
+  channelLength = resolveChannelRespectChannelLength(channelType),
+): number {
+  if (channelType === "lrc") {
+    return channelLength;
+  }
+  if (channelType === "regression") {
+    return (2 * channelLength) - 1;
+  }
+  if (channelType === "trend") {
+    return SCREENING_MAX_CANDLES;
+  }
+  return channelLength;
+}
+
+export function getChannelRespectTouchCandleCount(
+  channelType: ChannelType,
+  channelLength = resolveChannelRespectChannelLength(channelType),
+): number | null {
+  if (channelType === "trend") {
+    return null;
+  }
+  return channelLength;
+}
+
+export function describeChannelRespectCandleWindow(
+  channelRespect: Pick<ChannelRespect, "channel_type">,
+  indicators: IndicatorConfig[] = [],
+): {
+  touchLabel: string;
+  historyLabel: string;
+  detail: string;
+} {
+  const channelType = channelRespect.channel_type;
+  const channelLength = resolveChannelRespectChannelLength(channelType, indicators);
+  const historyCandles = getChannelRespectHistoryCandleCount(channelType, channelLength);
+  const touchCandles = getChannelRespectTouchCandleCount(channelType, channelLength);
+  const matchingIndicator = indicators.some((indicator) => indicator.name === channelType);
+  const lengthSource = matchingIndicator
+    ? `Uses your ${channelType === "lrc" ? "LRC" : channelType === "regression" ? "Regression Channel" : "Trend Channel"} indicator length (${channelLength}).`
+    : `Uses the default ${channelType === "lrc" ? "LRC" : channelType === "regression" ? "regression" : "trend"} channel length (${channelLength}).`;
+
+  if (channelType === "trend") {
+    return {
+      touchLabel: "Touch window: active trend channel segment (varies per symbol)",
+      historyLabel: `History loaded: up to ${historyCandles} candles`,
+      detail: `${lengthSource} Channel Respect counts touches only on the current active trend channel, not the full ${historyCandles}-bar history.`,
+    };
+  }
+
+  return {
+    touchLabel: `Touch window: last ${touchCandles} completed candles`,
+    historyLabel: `History loaded: ${historyCandles} candles`,
+    detail: `${lengthSource} Every touch in that window can count toward min/max respect (cluster grouping still applies).`,
+  };
+}
+
 export function getConfluenceSelectionOptions(
   channelType: ChannelType,
 ): readonly ConfluenceSelection[] {
@@ -1781,6 +1853,268 @@ export function getConfluenceSelectionOptions(
   }
 
   return ["upper", "middle", "lower"] as const;
+}
+
+export const CONFLUENCE_UI_SIGNAL_TYPES = ["bullish", "bearish", "breakout"] as const;
+export type ConfluenceUiSignalType = (typeof CONFLUENCE_UI_SIGNAL_TYPES)[number];
+
+export function isConfluenceUiSignalType(
+  type: Confluence["type"] | null | undefined,
+): type is ConfluenceUiSignalType {
+  return CONFLUENCE_UI_SIGNAL_TYPES.includes(type as ConfluenceUiSignalType);
+}
+
+const BULLISH_CONFLUENCE_SELECTIONS: Record<ChannelType, readonly ConfluenceSelection[]> = {
+  trend: ["bottom_line", "bottom_zone"],
+  lrc: ["lower"],
+  regression: ["lower"],
+};
+
+const BEARISH_CONFLUENCE_SELECTIONS: Record<ChannelType, readonly ConfluenceSelection[]> = {
+  trend: ["top_line", "top_zone"],
+  lrc: ["upper"],
+  regression: ["upper"],
+};
+
+function breakoutConfluenceSelections(
+  channelType: ChannelType,
+  sourceIndex: number,
+): readonly ConfluenceSelection[] {
+  if (sourceIndex === 0) {
+    return channelType === "trend" ? ["top_line", "top_zone"] : ["upper"];
+  }
+
+  return channelType === "trend"
+    ? ["top_line", "top_zone", "bottom_line", "bottom_zone"]
+    : ["upper", "lower"];
+}
+
+export function getAllowedConfluenceSelections(
+  confluenceType: ConfluenceUiSignalType,
+  channelType: ChannelType,
+  sourceIndex = 0,
+): ConfluenceSelection[] {
+  if (confluenceType === "bullish") {
+    return [...BULLISH_CONFLUENCE_SELECTIONS[channelType]];
+  }
+  if (confluenceType === "bearish") {
+    return [...BEARISH_CONFLUENCE_SELECTIONS[channelType]];
+  }
+  return [...breakoutConfluenceSelections(channelType, sourceIndex)];
+}
+
+export function isAllowedConfluenceSelection(
+  confluenceType: ConfluenceUiSignalType,
+  channelType: ChannelType,
+  selection: ConfluenceSelection,
+  sourceIndex = 0,
+): boolean {
+  return getAllowedConfluenceSelections(confluenceType, channelType, sourceIndex).includes(selection);
+}
+
+export function areConfluenceSourcesEquivalent(
+  left: Pick<ConfluenceSource, "channel_type" | "length" | "selection">,
+  right: Pick<ConfluenceSource, "channel_type" | "length" | "selection">,
+): boolean {
+  return (
+    left.channel_type === right.channel_type
+    && left.length === right.length
+    && left.selection === right.selection
+  );
+}
+
+export function wouldDuplicateConfluenceSource(
+  sources: ConfluenceSource[],
+  sourceIndex: number,
+  patch: Partial<ConfluenceSource>,
+): boolean {
+  const otherIndex = sourceIndex === 0 ? 1 : 0;
+  const current = sources[sourceIndex];
+  const other = sources[otherIndex];
+  if (!current || !other) {
+    return false;
+  }
+
+  const next = {
+    channel_type: patch.channel_type ?? current.channel_type,
+    length: patch.length ?? current.length,
+    selection: patch.selection ?? current.selection,
+  };
+
+  return areConfluenceSourcesEquivalent(next, other);
+}
+
+function alternateConfluenceChannelType(channelType: ChannelType): ChannelType {
+  if (channelType === "trend") {
+    return "lrc";
+  }
+  if (channelType === "lrc") {
+    return "regression";
+  }
+  return "trend";
+}
+
+function bumpConfluenceChannelLength(channelType: ChannelType, length: number): number {
+  if (channelType === "trend") {
+    return length + 4;
+  }
+  if (channelType === "lrc") {
+    return length + 50;
+  }
+  return length + 50;
+}
+
+export function getMinimumConfluenceSourceLength(
+  sources: ConfluenceSource[],
+  sourceIndex: number,
+  channelType: ChannelType,
+): number {
+  const otherIndex = sourceIndex === 0 ? 1 : 0;
+  const other = sources[otherIndex];
+  if (!other || other.channel_type !== channelType) {
+    return 2;
+  }
+  return other.length + 1;
+}
+
+function normalizeConfluenceSourceForUi(
+  source: ConfluenceSource,
+  sourceIndex: number,
+  confluenceType: ConfluenceUiSignalType,
+): ConfluenceSource {
+  const allowed = getAllowedConfluenceSelections(
+    confluenceType,
+    source.channel_type,
+    sourceIndex,
+  );
+  const selection = allowed.includes(source.selection)
+    ? source.selection
+    : getDefaultConfluenceSelection(source.channel_type, confluenceType, sourceIndex);
+
+  return createConfluenceSource(
+    source.channel_type,
+    {
+      ...source,
+      selection,
+      length: Math.max(2, Number(source.length) || getDefaultChannelLength(source.channel_type)),
+    },
+    sourceIndex,
+    confluenceType,
+  );
+}
+
+function resolveDuplicateConfluenceSource(
+  first: ConfluenceSource,
+  second: ConfluenceSource,
+  confluenceType: ConfluenceUiSignalType,
+): ConfluenceSource {
+  const allowed = getAllowedConfluenceSelections(
+    confluenceType,
+    second.channel_type,
+    1,
+  );
+
+  const alternateSelection = allowed.find((selection) => !areConfluenceSourcesEquivalent(
+    first,
+    { ...second, selection },
+  ));
+  if (alternateSelection) {
+    return createConfluenceSource(
+      second.channel_type,
+      { ...second, selection: alternateSelection },
+      1,
+      confluenceType,
+    );
+  }
+
+  const bumpedLength = bumpConfluenceChannelLength(second.channel_type, first.length);
+  if (!areConfluenceSourcesEquivalent(first, { ...second, length: bumpedLength })) {
+    return createConfluenceSource(
+      second.channel_type,
+      { ...second, length: bumpedLength },
+      1,
+      confluenceType,
+    );
+  }
+
+  const alternateChannelType = alternateConfluenceChannelType(second.channel_type);
+  return createConfluenceSource(
+    alternateChannelType,
+    {
+      ...second,
+      length: getDefaultChannelLength(alternateChannelType),
+      selection: getDefaultConfluenceSelection(alternateChannelType, confluenceType, 1),
+    },
+    1,
+    confluenceType,
+  );
+}
+
+export function sanitizeConfluenceUiConfig(confluence: Confluence): Confluence {
+  const confluenceType: ConfluenceUiSignalType = isConfluenceUiSignalType(confluence.type)
+    ? confluence.type
+    : "bullish";
+
+  const normalized = normalizeConfluenceConfig({
+    ...confluence,
+    type: confluenceType,
+  });
+  if (!normalized?.sources || normalized.sources.length < 2) {
+    return normalized ?? confluence;
+  }
+
+  let sources = normalized.sources.map((source, index) =>
+    normalizeConfluenceSourceForUi(source, index, confluenceType),
+  );
+
+  if (areConfluenceSourcesEquivalent(sources[0], sources[1])) {
+    sources = [
+      sources[0],
+      resolveDuplicateConfluenceSource(sources[0], sources[1], confluenceType),
+    ];
+  }
+
+  const second = sources[1];
+  if (
+    sources[0].channel_type === second.channel_type
+    && second.length <= sources[0].length
+  ) {
+    sources[1] = createConfluenceSource(
+      second.channel_type,
+      {
+        ...second,
+        length: getMinimumConfluenceSourceLength(sources, 1, second.channel_type),
+      },
+      1,
+      confluenceType,
+    );
+  }
+
+  return normalizeConfluenceConfig({
+    ...normalized,
+    type: confluenceType,
+    sources,
+    channels: sources.map((source) => source.channel_type),
+  }) ?? normalized;
+}
+
+export function describeConfluenceSelectionConstraint(
+  confluenceType: ConfluenceUiSignalType,
+  sourceIndex: number,
+): string {
+  if (confluenceType === "bullish") {
+    return sourceIndex === 0
+      ? "Bullish scans use support lines/zones only."
+      : "Pick a different support line/zone than Source 1, or use a different channel/length.";
+  }
+  if (confluenceType === "bearish") {
+    return sourceIndex === 0
+      ? "Bearish scans use resistance lines/zones only."
+      : "Pick a different resistance line/zone than Source 1, or use a different channel/length.";
+  }
+  return sourceIndex === 0
+    ? "Breakout Source 1 uses resistance lines/zones."
+    : "Breakout Source 2 can use resistance or support lines/zones.";
 }
 
 export function getDefaultConfluenceSelection(

@@ -1,14 +1,27 @@
-import { getDefaultChannelRespectConfig } from "@/types/screener";
-import type { ChannelRespect } from "@/types/screener";
+import {
+  describeChannelRespectCandleWindow,
+  getDefaultChannelRespectConfig,
+} from "@/types/screener";
+import type { ChannelRespect, IndicatorConfig } from "@/types/screener";
+import { FieldLabel, FilterToggle } from "./FilterUi";
+import { InfoTip } from "@/components/ui/info-tip";
 
 interface Props {
   value: ChannelRespect | null;
   onChange: (v: ChannelRespect | null) => void;
+  indicators?: IndicatorConfig[];
 }
 
 const CHANNEL_TYPES = ["lrc", "regression", "trend"] as const;
 
-export function ChannelRespectFilter({ value, onChange }: Props) {
+const inputClass =
+  "w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground";
+const chipClass = (active: boolean) =>
+  `rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+    active ? "border-primary bg-primary/10 text-accent-foreground" : "border-border text-muted-foreground"
+  }`;
+
+export function ChannelRespectFilter({ value, onChange, indicators = [] }: Props) {
   const enabled = value !== null;
 
   const toggle = () => {
@@ -60,99 +73,136 @@ export function ChannelRespectFilter({ value, onChange }: Props) {
     update({ line: selectionToLine(nextUpper, nextMiddle, nextLower) });
   };
 
+  const candleWindow = value
+    ? describeChannelRespectCandleWindow(value, indicators)
+    : null;
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={toggle}
-          className={`h-4 w-4 rounded border transition-colors ${enabled ? "bg-primary border-primary" : "border-border"}`}
-        />
-        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Channel Respect</label>
-      </div>
+      <FilterToggle
+        enabled={enabled}
+        onToggle={toggle}
+        label="Channel Respect"
+        info="Counts how many times price touched a channel line and bounced back. Assets pass only if their respect count falls within your min/max range."
+      />
       {enabled && value && (
-        <div className="grid grid-cols-2 gap-2 pl-6">
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Channel</div>
-            <select value={value.channel_type} onChange={e => update({ channel_type: e.target.value as ChannelRespect["channel_type"] })}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground">
-              {CHANNEL_TYPES.map(t => <option key={t} value={t}>{t === "lrc" ? "Linear Regression" : t === "regression" ? "Regression" : "Trend"}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Line To Respect</div>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => updateLineSelection(!upperSelected, middleSelected, lowerSelected)}
-                className={`rounded border px-2 py-1 text-[10px] transition-colors ${
-                  upperSelected ? "border-primary bg-primary/10 text-accent-foreground" : "border-border text-muted-foreground"
-                }`}
-              >
-                Upper
-              </button>
-              <button
-                onClick={() => updateLineSelection(upperSelected, middleSelected, !lowerSelected)}
-                className={`rounded border px-2 py-1 text-[10px] transition-colors ${
-                  lowerSelected ? "border-primary bg-primary/10 text-accent-foreground" : "border-border text-muted-foreground"
-                }`}
-              >
-                Lower
-              </button>
-              <button
-                onClick={() => updateLineSelection(upperSelected, !middleSelected, lowerSelected)}
-                className={`rounded border px-2 py-1 text-[10px] transition-colors ${
-                  middleSelected ? "border-primary bg-primary/10 text-accent-foreground" : "border-border text-muted-foreground"
-                }`}
-              >
-                Middle
-              </button>
+        <div className="space-y-3 pl-7">
+          {candleWindow ? (
+            <div className="flex items-center gap-2 rounded-md border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">
+              <span className="font-medium text-sky-200/90">Candle window</span>
+              <InfoTip
+                side="right"
+                content={
+                  <div className="space-y-1">
+                    <div>{candleWindow.touchLabel}</div>
+                    <div>{candleWindow.historyLabel}</div>
+                    <div>{candleWindow.detail}</div>
+                  </div>
+                }
+              />
             </div>
-            <div className="text-[10px] text-muted-foreground">
-              You can pair Middle with Upper or Lower, or select all three.
+          ) : null}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <FieldLabel>Channel</FieldLabel>
+              <select
+                value={value.channel_type}
+                onChange={(e) => update({ channel_type: e.target.value as ChannelRespect["channel_type"] })}
+                className={inputClass}
+              >
+                {CHANNEL_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t === "lrc" ? "Linear Regression" : t === "regression" ? "Regression" : "Trend"}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Minimum Touches</div>
-            <input type="number" min="1" value={value.min_respect ?? ""} onChange={e => update({ min_respect: e.target.value ? Number(e.target.value) : null })}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground" />
-          </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Maximum Touches</div>
-            <input type="number" min="1" value={value.max_respect ?? ""} onChange={e => update({ max_respect: e.target.value ? Number(e.target.value) : null })}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground" />
-          </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Tolerance %</div>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={value.tolerance_pct}
-              onChange={e => update({ tolerance_pct: Number(e.target.value) || 0 })}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-            />
-          </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Touch Detail</div>
-            <select
-              value={value.touch_type ?? "wick"}
-              onChange={e => update({ touch_type: e.target.value as ChannelRespect["touch_type"] })}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-            >
-              <option value="wick">Wick</option>
-              <option value="body">Body</option>
-              <option value="both">Wick / Body</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Cluster Window (3-5 candles)</div>
-            <input
-              type="number"
-              min="3"
-              max="5"
-              value={value.cluster_gap}
-              onChange={e => update({ cluster_gap: Math.min(5, Math.max(3, Number(e.target.value) || 3)) })}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-            />
+            <div className="space-y-1.5">
+              <FieldLabel info="You can pair Middle with Upper or Lower, or select all three.">
+                Line To Respect
+              </FieldLabel>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => updateLineSelection(!upperSelected, middleSelected, lowerSelected)}
+                  className={chipClass(upperSelected)}
+                >
+                  Upper
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateLineSelection(upperSelected, middleSelected, !lowerSelected)}
+                  className={chipClass(lowerSelected)}
+                >
+                  Lower
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateLineSelection(upperSelected, !middleSelected, lowerSelected)}
+                  className={chipClass(middleSelected)}
+                >
+                  Middle
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel>Minimum Touches</FieldLabel>
+              <input
+                type="number"
+                min="1"
+                value={value.min_respect ?? ""}
+                onChange={(e) => update({ min_respect: e.target.value ? Number(e.target.value) : null })}
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel>Maximum Touches</FieldLabel>
+              <input
+                type="number"
+                min="1"
+                value={value.max_respect ?? ""}
+                onChange={(e) => update({ max_respect: e.target.value ? Number(e.target.value) : null })}
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel info="How close a near-miss can be and still count as a touch.">
+                Tolerance %
+              </FieldLabel>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={value.tolerance_pct}
+                onChange={(e) => update({ tolerance_pct: Number(e.target.value) || 0 })}
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel>Touch Detail</FieldLabel>
+              <select
+                value={value.touch_type ?? "wick"}
+                onChange={(e) => update({ touch_type: e.target.value as ChannelRespect["touch_type"] })}
+                className={inputClass}
+              >
+                <option value="wick">Wick</option>
+                <option value="body">Body</option>
+                <option value="both">Wick / Body</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel info="Nearby touches within a few candles count as one respect, not many.">
+                Cluster Window (3-5 candles)
+              </FieldLabel>
+              <input
+                type="number"
+                min="3"
+                max="5"
+                value={value.cluster_gap}
+                onChange={(e) => update({ cluster_gap: Math.min(5, Math.max(3, Number(e.target.value) || 3)) })}
+                className={inputClass}
+              />
+            </div>
           </div>
         </div>
       )}

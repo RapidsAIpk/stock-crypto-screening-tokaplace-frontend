@@ -379,12 +379,12 @@ export function IndicatorsFilter({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Indicators</label>
+        <label className="text-sm font-medium uppercase tracking-wider text-muted-foreground">Indicators</label>
         <button
           onClick={() => setShowAdd(!showAdd)}
-          className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"
         >
-          <Plus className="h-3 w-3" /> Add
+          <Plus className="h-4 w-4" /> Add
         </button>
       </div>
 

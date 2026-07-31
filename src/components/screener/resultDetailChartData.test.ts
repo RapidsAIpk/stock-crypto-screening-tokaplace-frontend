@@ -1,15 +1,150 @@
 import { describe, expect, it } from "vitest";
 import type { MarketCandle } from "@/types/screener";
 import {
+  confluenceValueAt,
   createLinearRegressionCandles,
+  normalizeConfluenceChartSources,
+  normalizeLrcChannel,
   normalizeMarketCandles,
   normalizeRegressionChannel,
   normalizeTrendChannel,
   regressionValueAt,
+  resolveChannelRespectHighlightTimes,
+  resolveChartChannelVisibility,
+  resolveConfluenceHighlightTimes,
   trendValueAt,
 } from "./resultDetailChartData";
 
+describe("resolveChartChannelVisibility", () => {
+  it("shows channel charts from indicators alone", () => {
+    expect(resolveChartChannelVisibility([
+      { name: "regression" },
+      { name: "trend" },
+    ])).toEqual({ lrc: false, regression: true, trend: true });
+  });
+
+  it("shows channel charts when channel respect or confluence request them", () => {
+    expect(resolveChartChannelVisibility([], {
+      channel_respect: { channel_type: "trend" },
+    })).toEqual({ lrc: false, regression: false, trend: true });
+
+    expect(resolveChartChannelVisibility([], {
+      confluence: {
+        sources: [
+          { channel_type: "regression" },
+          { channel_type: "lrc" },
+        ],
+      },
+    })).toEqual({ lrc: true, regression: true, trend: false });
+
+    expect(resolveChartChannelVisibility([], {
+      confluence: {
+        channels: ["trend", "regression"],
+      },
+    })).toEqual({ lrc: false, regression: true, trend: true });
+  });
+});
+
+describe("resolveChannelRespectHighlightTimes", () => {
+  const filterDetails = [{
+    name: "channel_respect",
+    passed: true,
+    details: { matched_candle_times: [1_000, 2_000_000_000_000] },
+  }];
+
+  it("returns backend-matched candle times only on the requested channel chart", () => {
+    expect([...resolveChannelRespectHighlightTimes(filterDetails, {
+      channel_respect: { channel_type: "regression" },
+    }, "regression")]).toEqual([1_000, 2_000_000_000]);
+
+    expect(resolveChannelRespectHighlightTimes(filterDetails, {
+      channel_respect: { channel_type: "regression" },
+    }, "price").size).toBe(0);
+  });
+
+  it("does not highlight candles for a failed channel respect detail", () => {
+    expect(resolveChannelRespectHighlightTimes([{
+      ...filterDetails[0],
+      passed: false,
+    }], {
+      channel_respect: { channel_type: "regression" },
+    }, "regression").size).toBe(0);
+  });
+});
+
+describe("Confluence chart data", () => {
+  it("normalizes the two configured source instances and selected line/zone", () => {
+    const sources = normalizeConfluenceChartSources({
+      fast_lrc: {
+        channel_type: "lrc",
+        channel: { lower: [10, 11], middle: [12, 13], upper: [14, 15] },
+      },
+      trend_zone: {
+        channel_type: "trend",
+        channel: {
+          top_zone_lower: [20, 21],
+          top_zone_upper: [22, 23],
+        },
+      },
+    }, {
+      confluence: {
+        sources: [
+          { id: "fast_lrc", channel_type: "lrc", selection: "lower" },
+          { id: "trend_zone", channel_type: "trend", selection: "top_zone" },
+        ],
+      },
+    });
+
+    expect(sources).toHaveLength(2);
+    expect(sources[0]).toMatchObject({
+      sourceId: "fast_lrc",
+      selection: "lower",
+      lower: [10, 11],
+      upper: [10, 11],
+      isZone: false,
+    });
+    expect(sources[1]).toMatchObject({
+      sourceId: "trend_zone",
+      selection: "top_zone",
+      lower: [20, 21],
+      upper: [22, 23],
+      mid: [21, 22],
+      isZone: true,
+    });
+    expect(confluenceValueAt(sources[1], "mid", 4, 5)).toBe(22);
+  });
+
+  it("uses only passed backend Confluence evidence for cyan outlines", () => {
+    expect([...resolveConfluenceHighlightTimes([{
+      name: "confluence",
+      passed: true,
+      details: { matched_candle_times: [1_000, 2_000_000_000_000] },
+    }])]).toEqual([1_000, 2_000_000_000]);
+
+    expect(resolveConfluenceHighlightTimes([{
+      name: "confluence",
+      passed: false,
+      details: { matched_candle_times: [1_000] },
+    }]).size).toBe(0);
+  });
+});
+
 describe("result detail chart candle data", () => {
+  it("normalizes LRC channel lines for charting", () => {
+    expect(normalizeLrcChannel({
+      lrc: {
+        upper: [3, 4],
+        middle: [2, 3],
+        lower: [1, 2],
+      },
+    })).toMatchObject({
+      upper: [3, 4],
+      middle: [2, 3],
+      lower: [1, 2],
+      length: 2,
+    });
+  });
+
   it("aligns backend regression values to the last channel-length candles", () => {
     const channel = normalizeRegressionChannel({
       regression: {
@@ -17,6 +152,7 @@ describe("result detail chart candle data", () => {
         upper: [11, 12, 13],
         middle: [10, 11, 12],
         lower: [9, 10, 11],
+        tracer: [10.5, 11.25, 11.75],
       },
     });
 
@@ -24,6 +160,7 @@ describe("result detail chart candle data", () => {
     expect(regressionValueAt(channel!, "middle", 1, 5)).toBeNull();
     expect(regressionValueAt(channel!, "middle", 2, 5)).toBe(10);
     expect(regressionValueAt(channel!, "middle", 4, 5)).toBe(12);
+    expect(regressionValueAt(channel!, "tracer", 4, 5)).toBe(11.75);
   });
 
   it("rejects incomplete regression series instead of drawing misaligned lines", () => {

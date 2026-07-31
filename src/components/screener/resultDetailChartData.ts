@@ -17,10 +17,11 @@ export interface RegressionChannelSeries {
   middle: Array<number | null>;
   q1: Array<number | null>;
   lower: Array<number | null>;
+  tracer: Array<number | null>;
   length: number;
 }
 
-export type RegressionChannelLine = "upper" | "q3" | "middle" | "q1" | "lower";
+export type RegressionChannelLine = "upper" | "q3" | "middle" | "q1" | "lower" | "tracer";
 
 export interface TrendChannelSeries {
   top: Array<number | null>;
@@ -108,6 +109,7 @@ export function normalizeRegressionChannel(
   const middle = normalizeSeries(source.middle);
   const q1 = normalizeSeries(source.q1);
   const lower = normalizeSeries(source.lower);
+  const tracer = normalizeSeries(source.tracer);
   const availableLength = Math.min(upper.length, middle.length, lower.length);
   const configuredLength = Math.trunc(Number(source.length));
   const length = Number.isFinite(configuredLength) && configuredLength > 0
@@ -121,6 +123,36 @@ export function normalizeRegressionChannel(
     middle: middle.slice(-length),
     q1: q1.length >= length ? q1.slice(-length) : Array(length).fill(null),
     lower: lower.slice(-length),
+    tracer: tracer.length >= length ? tracer.slice(-length) : Array(length).fill(null),
+    length,
+  };
+}
+
+export function normalizeLrcChannel(
+  channels: Record<string, unknown> | null | undefined,
+): RegressionChannelSeries | null {
+  const raw = channels?.lrc;
+  if (!raw || typeof raw !== "object") return null;
+
+  const source = raw as Record<string, unknown>;
+  const normalizeSeries = (value: unknown): Array<number | null> => (
+    Array.isArray(value)
+      ? value.map((item) => item == null ? null : finiteNumber(item))
+      : []
+  );
+  const upper = normalizeSeries(source.upper);
+  const middle = normalizeSeries(source.middle);
+  const lower = normalizeSeries(source.lower);
+  const length = Math.min(upper.length, middle.length, lower.length);
+
+  if (length <= 0) return null;
+  return {
+    upper: upper.slice(-length),
+    q3: Array(length).fill(null),
+    middle: middle.slice(-length),
+    q1: Array(length).fill(null),
+    lower: lower.slice(-length),
+    tracer: Array(length).fill(null),
     length,
   };
 }
@@ -190,6 +222,211 @@ export function trendValueAt(
   const channelIndex = candleIndex - (candleCount - channel.length);
   if (channelIndex < 0 || channelIndex >= channel.length) return null;
   return channel[line][channelIndex] ?? null;
+}
+
+export interface ChartChannelVisibility {
+  lrc: boolean;
+  regression: boolean;
+  trend: boolean;
+}
+
+export interface ConfluenceChartSource {
+  sourceId: string;
+  channelType: string;
+  selection: string;
+  length: number;
+  lower: Array<number | null>;
+  upper: Array<number | null>;
+  mid: Array<number | null>;
+  isZone: boolean;
+}
+
+function normalizedSeries(value: unknown): Array<number | null> {
+  return Array.isArray(value)
+    ? value.map((item) => item == null ? null : finiteNumber(item))
+    : [];
+}
+
+function confluenceSelectionSeries(
+  channelType: string,
+  selection: string,
+  channel: Record<string, unknown>,
+): { lower: Array<number | null>; upper: Array<number | null>; isZone: boolean } | null {
+  const normalizedType = channelType.trim().toLowerCase();
+  const normalizedSelection = selection.trim().toLowerCase();
+
+  if (normalizedType === "trend") {
+    const mapping: Record<string, [string, string]> = {
+      top_line: ["top", "top"],
+      middle_line: ["middle", "middle"],
+      bottom_line: ["bottom", "bottom"],
+      top_zone: ["top_zone_lower", "top_zone_upper"],
+      bottom_zone: ["bottom_zone_lower", "bottom_zone_upper"],
+    };
+    const names = mapping[normalizedSelection];
+    if (!names) return null;
+    const lower = normalizedSeries(channel[names[0]]);
+    const upper = normalizedSeries(channel[names[1]]);
+    return { lower, upper, isZone: names[0] !== names[1] };
+  }
+
+  const seriesName = ["upper", "middle", "lower"].includes(normalizedSelection)
+    ? normalizedSelection
+    : "lower";
+  const line = normalizedSeries(channel[seriesName]);
+  return { lower: line, upper: line, isZone: false };
+}
+
+export function normalizeConfluenceChartSources(
+  confluenceChannels: Record<string, unknown> | null | undefined,
+  requestFilters?: Record<string, unknown> | null,
+): ConfluenceChartSource[] {
+  if (!confluenceChannels || typeof confluenceChannels !== "object") return [];
+
+  const config = requestFilters?.confluence;
+  const configuredSources = config && typeof config === "object"
+    && Array.isArray((config as Record<string, unknown>).sources)
+    ? (config as Record<string, unknown>).sources as Array<Record<string, unknown>>
+    : [];
+
+  const entries = Object.entries(confluenceChannels);
+  return entries.flatMap(([sourceId, rawPayload], fallbackIndex) => {
+    if (!rawPayload || typeof rawPayload !== "object") return [];
+    const payload = rawPayload as Record<string, unknown>;
+    const channel = payload.channel;
+    if (!channel || typeof channel !== "object") return [];
+
+    const configured = configuredSources.find((source) => String(source.id || "") === sourceId)
+      ?? configuredSources[fallbackIndex];
+    const channelType = String(payload.channel_type ?? configured?.channel_type ?? "").trim().toLowerCase();
+    const selection = String(payload.selection ?? configured?.selection ?? "").trim().toLowerCase();
+    const selectedSeries = confluenceSelectionSeries(
+      channelType,
+      selection,
+      channel as Record<string, unknown>,
+    );
+    if (!selectedSeries) return [];
+
+    const length = Math.min(selectedSeries.lower.length, selectedSeries.upper.length);
+    if (length <= 0) return [];
+    const lower = selectedSeries.lower.slice(-length);
+    const upper = selectedSeries.upper.slice(-length);
+    const mid = lower.map((value, index) => {
+      const upperValue = upper[index];
+      return value === null || upperValue === null ? null : (value + upperValue) / 2;
+    });
+
+    return [{
+      sourceId,
+      channelType,
+      selection,
+      length,
+      lower,
+      upper,
+      mid,
+      isZone: selectedSeries.isZone,
+    }];
+  }).slice(0, 2);
+}
+
+export function confluenceValueAt(
+  source: ConfluenceChartSource,
+  line: "lower" | "upper" | "mid",
+  candleIndex: number,
+  candleCount: number,
+): number | null {
+  const sourceIndex = candleIndex - (candleCount - source.length);
+  if (sourceIndex < 0 || sourceIndex >= source.length) return null;
+  return source[line][sourceIndex] ?? null;
+}
+
+export function resolveConfluenceHighlightTimes(
+  filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
+): Set<number> {
+  const detail = filterDetails.find((item) => item.name === "confluence" && item.passed);
+  const rawTimes = detail?.details?.matched_candle_times;
+  if (!Array.isArray(rawTimes)) return new Set();
+
+  return new Set(rawTimes.flatMap((value) => {
+    const parsed = finiteNumber(value);
+    if (parsed === null) return [];
+    return [parsed > 10_000_000_000 ? Math.floor(parsed / 1000) : Math.floor(parsed)];
+  }));
+}
+
+export function resolveChannelRespectHighlightTimes(
+  filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
+  requestFilters?: Record<string, unknown> | null,
+  mode?: string,
+): Set<number> {
+  const channelRespect = requestFilters?.channel_respect;
+  if (!channelRespect || typeof channelRespect !== "object") return new Set();
+
+  const channelType = String(
+    (channelRespect as Record<string, unknown>).channel_type || "",
+  ).trim().toLowerCase();
+  if (!channelType || channelType !== mode) return new Set();
+
+  const detail = filterDetails.find((item) => item.name === "channel_respect" && item.passed);
+  const rawTimes = detail?.details?.matched_candle_times;
+  if (!Array.isArray(rawTimes)) return new Set();
+
+  return new Set(rawTimes.flatMap((value) => {
+    const parsed = finiteNumber(value);
+    if (parsed === null) return [];
+    return [parsed > 10_000_000_000 ? Math.floor(parsed / 1000) : Math.floor(parsed)];
+  }));
+}
+
+function collectRequestedChannelTypes(requestFilters?: Record<string, unknown> | null): Set<string> {
+  const channelTypes = new Set<string>();
+
+  const channelRespect = requestFilters?.channel_respect;
+  if (channelRespect && typeof channelRespect === "object") {
+    const channelType = String((channelRespect as Record<string, unknown>).channel_type || "").trim().toLowerCase();
+    if (channelType) {
+      channelTypes.add(channelType);
+    }
+  }
+
+  const confluence = requestFilters?.confluence;
+  if (confluence && typeof confluence === "object") {
+    const config = confluence as Record<string, unknown>;
+    const sources = Array.isArray(config.sources) ? config.sources : [];
+    for (const source of sources) {
+      if (!source || typeof source !== "object") {
+        continue;
+      }
+      const channelType = String((source as Record<string, unknown>).channel_type || "").trim().toLowerCase();
+      if (channelType) {
+        channelTypes.add(channelType);
+      }
+    }
+
+    const channels = Array.isArray(config.channels) ? config.channels : [];
+    for (const channelType of channels) {
+      const normalized = String(channelType || "").trim().toLowerCase();
+      if (normalized) {
+        channelTypes.add(normalized);
+      }
+    }
+  }
+
+  return channelTypes;
+}
+
+export function resolveChartChannelVisibility(
+  indicatorDetails: Array<{ name: string }>,
+  requestFilters?: Record<string, unknown> | null,
+): ChartChannelVisibility {
+  const indicatorNames = new Set(indicatorDetails.map((item) => item.name));
+  const requestedChannelTypes = collectRequestedChannelTypes(requestFilters);
+
+  return {
+    lrc: indicatorNames.has("lrc") || requestedChannelTypes.has("lrc"),
+    regression: indicatorNames.has("regression") || requestedChannelTypes.has("regression"),
+    trend: indicatorNames.has("trend") || requestedChannelTypes.has("trend"),
+  };
 }
 
 function rollingLinearRegression(values: number[], length: number): number[] {

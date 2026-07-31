@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PriceRange } from "@/types/screener";
+import { FieldLabel, FilterToggle } from "./FilterUi";
 
 interface Props {
   value: PriceRange | null;
   onChange: (value: PriceRange | null) => void;
 }
+
+const inputClass =
+  "w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground";
 
 export function PriceRangeFilter({ value, onChange }: Props) {
   const enabled = value !== null;
@@ -21,13 +25,13 @@ export function PriceRangeFilter({ value, onChange }: Props) {
   }, [value?.max_price, value?.min_price]);
 
   const helper = useMemo(() => {
-    if (!enabled) return "Disabled";
+    if (!enabled) return "Leave blank for any price. Set min, max, or both to narrow results.";
     const min = minInput.trim();
     const max = maxInput.trim();
-    if (!min && !max) return "Any price";
-    if (min && max) return `Range: ${min} - ${max}`;
-    if (min) return `Minimum: ${min}`;
-    return `Maximum: ${max}`;
+    if (!min && !max) return "Any price — leave both fields blank.";
+    if (min && max) return `Active range: ${min} – ${max}`;
+    if (min) return `Minimum price: ${min}`;
+    return `Maximum price: ${max}`;
   }, [enabled, maxInput, minInput]);
 
   const apply = (nextMin: string, nextMax: string) => {
@@ -46,24 +50,22 @@ export function PriceRangeFilter({ value, onChange }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => {
-            if (enabled) {
-              onChange(null);
-              return;
-            }
-            onChange({ min_price: null, max_price: null });
-          }}
-          className={`h-4 w-4 rounded border transition-colors ${enabled ? "bg-primary border-primary" : "border-border"}`}
-        />
-        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Average Price Range</label>
-      </div>
-      <p className="pl-6 text-[10px] text-muted-foreground">{helper}</p>
+      <FilterToggle
+        enabled={enabled}
+        onToggle={() => {
+          if (enabled) {
+            onChange(null);
+            return;
+          }
+          onChange({ min_price: null, max_price: null });
+        }}
+        label="Average Price Range"
+        info={helper}
+      />
       {enabled && (
-        <div className="grid grid-cols-2 gap-2 pl-6">
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Min</div>
+        <div className="grid grid-cols-2 gap-3 pl-7">
+          <div className="space-y-1.5">
+            <FieldLabel>Min</FieldLabel>
             <input
               type="number"
               min="0"
@@ -74,12 +76,12 @@ export function PriceRangeFilter({ value, onChange }: Props) {
                 setMinInput(next);
                 apply(next, maxInput);
               }}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+              className={inputClass}
               placeholder="0"
             />
           </div>
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Max</div>
+          <div className="space-y-1.5">
+            <FieldLabel>Max</FieldLabel>
             <input
               type="number"
               min="0"
@@ -90,7 +92,7 @@ export function PriceRangeFilter({ value, onChange }: Props) {
                 setMaxInput(next);
                 apply(minInput, next);
               }}
-              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+              className={inputClass}
               placeholder="No cap"
             />
           </div>

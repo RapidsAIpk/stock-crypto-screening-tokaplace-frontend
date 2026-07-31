@@ -3,10 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useScreener } from "@/hooks/useScreener";
 import {
+  describeChannelRespectCandleWindow,
+  getChannelRespectHistoryCandleCount,
+  getChannelRespectTouchCandleCount,
   getDefaultChannelLength,
   getDefaultIndicatorConfig,
   INDICATOR_DEFINITIONS,
   normalizeIndicatorConfig,
+  resolveChannelRespectChannelLength,
 } from "@/types/screener";
 
 describe("indicator defaults", () => {
@@ -40,6 +44,29 @@ describe("indicator defaults", () => {
     expect(getDefaultChannelLength("lrc")).toBe(100);
     expect(getDefaultChannelLength("regression")).toBe(200);
     expect(getDefaultChannelLength("trend")).toBe(8);
+  });
+
+  it("describes channel respect candle windows for each channel type", () => {
+    expect(getChannelRespectTouchCandleCount("lrc")).toBe(100);
+    expect(getChannelRespectHistoryCandleCount("lrc")).toBe(100);
+    expect(getChannelRespectTouchCandleCount("regression")).toBe(200);
+    expect(getChannelRespectHistoryCandleCount("regression")).toBe(399);
+    expect(getChannelRespectTouchCandleCount("trend")).toBeNull();
+    expect(getChannelRespectHistoryCandleCount("trend")).toBe(500);
+
+    expect(
+      describeChannelRespectCandleWindow({ channel_type: "regression" }).touchLabel,
+    ).toContain("200");
+
+    expect(
+      describeChannelRespectCandleWindow(
+        { channel_type: "trend" },
+        [{ name: "trend", timeframe: "single", config: { length: 12 } }],
+      ).detail,
+    ).toContain("12");
+    expect(resolveChannelRespectChannelLength("trend", [
+      { name: "trend", timeframe: "single", config: { length: 12 } },
+    ])).toBe(12);
   });
 
   it("fills missing indicator config from the updated defaults", () => {

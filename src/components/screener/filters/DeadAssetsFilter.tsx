@@ -6,6 +6,7 @@ import type {
 import { DEFAULT_DEAD_ASSETS_FILTER } from "@/types/screener";
 import { CheckboxGroup } from "./CheckboxGroup";
 import { PresetOrCustomField } from "./PresetOrCustomField";
+import { FieldLabel, FilterToggle } from "./FilterUi";
 
 interface Props {
   value: DeadAssetsFilterConfig | null;
@@ -94,14 +95,13 @@ function DeadAssetsSelectField<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className={`space-y-1 ${disabled ? "opacity-50" : ""}`}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
-      <p className="text-[9px] leading-3 text-muted-foreground/80">Used by: {usedBy}</p>
+    <div className={`space-y-1.5 ${disabled ? "opacity-50" : ""}`}>
+      <FieldLabel info={`Used by: ${usedBy}`}>{label}</FieldLabel>
       <select
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value as T)}
-        className="w-full rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
+        className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed"
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -143,24 +143,19 @@ export function DeadAssetsFilter({ value, onChange }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={toggle}
-          className={`h-4 w-4 rounded border transition-colors ${enabled ? "bg-primary border-primary" : "border-border"}`}
-        />
-        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Dead Assets Filter</label>
-      </div>
-      <p className="pl-6 text-[10px] text-muted-foreground">
-        Excludes assets stuck in a long-term downtrend. Never permanently blacklists — a genuine recovery re-admits the asset automatically.
-      </p>
+      <FilterToggle
+        enabled={enabled}
+        onToggle={toggle}
+        label="Dead Assets Filter"
+        info="Excludes assets stuck in a long-term downtrend. Never permanently blacklists — a genuine recovery re-admits the asset automatically."
+      />
 
       {enabled && value && (
-        <div className="space-y-3 pl-6">
-          <div className="space-y-1">
-            <div className="text-[10px] text-muted-foreground">Dead Trend Type</div>
-            <p className="text-[9px] leading-3 text-muted-foreground/80">
-              Select which patterns to check. Settings below activate only for your selected types.
-            </p>
+        <div className="space-y-3 pl-7">
+          <div className="space-y-1.5">
+            <FieldLabel info="Select which patterns to check. Settings below activate only for your selected types.">
+              Dead Trend Type
+            </FieldLabel>
             <CheckboxGroup
               options={DEAD_TREND_TYPE_OPTIONS}
               selected={value.dead_trend_types}
