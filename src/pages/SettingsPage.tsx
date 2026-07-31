@@ -6,6 +6,14 @@ import { toast } from "sonner";
 import { appEnv } from "@/config/env";
 import { getAllDefaultIndicatorConfigs, INDICATOR_DEFINITIONS } from "@/types/screener";
 import { INDICATOR_LABELS } from "@/components/screener/filters/IndicatorsFilter";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { InfoTip } from "@/components/ui/info-tip";
+import { FieldLabel } from "@/components/screener/filters/FilterUi";
 
 type HealthPayload = {
   status?: string;
@@ -578,429 +586,413 @@ const SettingsPage = () => {
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-6">
+      <div className="max-w-4xl mx-auto px-4 py-6">
         <p className="text-sm text-muted-foreground animate-pulse">Loading settings...</p>
       </div>
     );
   }
 
+  const actionButtonClass =
+    "inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-secondary/60 disabled:opacity-50";
+  const inputClass = "w-full rounded-md border border-border bg-secondary/40 px-3 py-2.5 text-sm";
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-      <h1 className="text-xl font-semibold text-foreground">Control Dashboard</h1>
-      <p className="text-sm text-muted-foreground">
-        Use this page to monitor backend health, tune API behavior, and control market-data worker performance.
-        Changes here help balance speed, stability, and resource usage.
-      </p>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Site Health</h2>
-          </div>
-          <button
-            onClick={refreshHealth}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary/60"
-          >
-            <RotateCcw className={`h-3.5 w-3.5 ${refreshingHealth ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
-        <p className="text-xs text-muted-foreground">Health source: {apiRoot}</p>
-        <p className="text-xs text-muted-foreground">
-          Tip: `Health` confirms basic service availability. `Readiness` confirms the app can process screening requests.
-        </p>
-        {healthError && <p className="text-xs text-destructive">{healthError}</p>}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <div className="rounded border border-border/70 p-3 text-xs">
-            <div className="text-muted-foreground">Health</div>
-            <div className="font-mono mt-1">{health?.status ?? "unknown"}</div>
-            <div className="mt-1 text-muted-foreground">Env: {health?.environment ?? "n/a"}</div>
-          </div>
-          <div className="rounded border border-border/70 p-3 text-xs">
-            <div className="text-muted-foreground">Readiness</div>
-            <div className="font-mono mt-1">{ready?.status ?? "unknown"}</div>
-            <div className="mt-1 text-muted-foreground">
-              Worker: {ready?.worker?.running ? "running" : "stopped/degraded"}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Server Runtime Settings</h2>
-        <p className="text-xs text-muted-foreground">
-          This is the live server-side effective configuration. Use it to verify what the backend is actually using.
-        </p>
-        <div className="rounded border border-border/70 p-3 text-xs font-mono whitespace-pre-wrap break-words">
-          {runtimeSettings
-            ? JSON.stringify(runtimeSettings, null, 2)
-            : "No server runtime payload yet. Press Refresh in Site Health."}
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">API Control</h2>
-        <p className="text-xs text-muted-foreground">
-          These values control how the frontend talks to your backend.
-        </p>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Admin API Token</label>
-          <input
-            value={adminApiToken}
-            onChange={(e) => setAdminApiToken(e.target.value)}
-            placeholder="X-Admin-Token"
-            className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Required only if backend `ADMIN_API_TOKEN` is configured. Sent as `X-Admin-Token` for protected ops.
+    <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Control Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Monitor backend health, tune API behavior, and control worker performance.
           </p>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">API Base Override</label>
-          <input
-            value={apiBaseOverride}
-            onChange={(e) => setApiBaseOverride(e.target.value)}
-            placeholder={appEnv.apiBase}
-            className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Point the UI to another backend environment without changing `.env`.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Request Timeout (ms)</label>
-            <input
-              type="number"
-              min={1000}
-              step={500}
-              value={apiTimeoutMs}
-              onChange={(e) => setApiTimeoutMs(Number(e.target.value) || 48000)}
-              className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Higher timeout helps slow networks; lower timeout fails fast.
-            </p>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Retries</label>
-            <input
-              type="number"
-              min={0}
-              max={5}
-              value={apiRetries}
-              onChange={(e) => setApiRetries(Number(e.target.value) || 0)}
-              className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Retries transient network failures. Keep low to avoid duplicate load.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Scanner Controls</h2>
-        <p className="text-xs text-muted-foreground">
-          Enable, disable, or refresh the background market-data worker, and edit its polling defaults.
-        </p>
-        <div className="rounded border border-border/70 p-3 text-xs space-y-1">
-          <div>Status: <span className="font-mono">{workerOps?.worker?.running ? "running" : "stopped"}</span></div>
-          <div className="text-muted-foreground">Last run: {workerOps?.worker?.last_run_at ?? "n/a"}</div>
-          <div className="text-muted-foreground">Last success: {workerOps?.worker?.last_success_at ?? "n/a"}</div>
-          {workerOps?.worker?.last_error && (
-            <div className="text-destructive">Last error: {workerOps.worker.last_error}</div>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={startWorker}
-            disabled={workerBusy}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60 disabled:opacity-50"
-          >
-            <Play className="h-3.5 w-3.5" /> Start
-          </button>
-          <button
-            onClick={stopWorker}
-            disabled={workerBusy}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60 disabled:opacity-50"
-          >
-            <Square className="h-3.5 w-3.5" /> Stop
-          </button>
-          <button
-            onClick={refreshWorker}
-            disabled={workerBusy}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60 disabled:opacity-50"
-          >
-            <RotateCcw className={`h-3.5 w-3.5 ${workerBusy ? "animate-spin" : ""}`} /> Refresh
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Poll Interval (seconds)</label>
-            <input
-              type="number"
-              min={1}
-              value={workerPollInterval}
-              onChange={(e) => setWorkerPollInterval(Number(e.target.value) || 15)}
-              className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Batch Size</label>
-            <input
-              type="number"
-              min={1}
-              value={workerBatchSize}
-              onChange={(e) => setWorkerBatchSize(Number(e.target.value) || 50)}
-              className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
-        <button
-          onClick={applyWorkerConfig}
-          disabled={workerBusy}
-          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60 disabled:opacity-50"
-        >
-          Apply Worker Config
-        </button>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Indicator Controls</h2>
-        <p className="text-xs text-muted-foreground">
-          Enable or disable indicators from the Add picker (existing selections are untouched), and edit
-          per-indicator/per-filter default parameters as JSON.
-        </p>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Enabled Indicators</label>
-          <div className="flex flex-wrap gap-2">
-            {INDICATOR_DEFINITIONS.map((ind) => {
-              const isDisabled = (settings.disabledIndicators ?? []).includes(ind.name);
-              return (
-                <button
-                  key={ind.name}
-                  onClick={() => toggleDisabledIndicator(ind.name)}
-                  className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                    isDisabled
-                      ? "border-border text-muted-foreground"
-                      : "border-primary/40 bg-primary/10 text-primary"
-                  }`}
-                >
-                  {INDICATOR_LABELS[ind.name]}
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Disabled indicators stay usable if already added to a scan; they just drop out of the Add picker.
-          </p>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Indicator Default Parameters (JSON)</label>
-          <textarea
-            value={indicatorDefaultsText}
-            onChange={(e) => setIndicatorDefaultsText(e.target.value)}
-            rows={10}
-            spellCheck={false}
-            className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Per-indicator thresholds, lengths, and lookback periods used as defaults when adding an indicator.
-          </p>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Confluence / Channel Respect Defaults (JSON)</label>
-          <textarea
-            value={postFilterDefaultsText}
-            onChange={(e) => setPostFilterDefaultsText(e.target.value)}
-            rows={6}
-            spellCheck={false}
-            className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Keys: `channel_respect`, `confluence`. Applied as toggle-on defaults for those two filters.
-          </p>
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          Indicator and post-filter defaults save with the "Save Control Settings" button below.
-        </p>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Integration Controls</h2>
-        <p className="text-xs text-muted-foreground">
-          Enable/disable each provider, set runtime API keys, and monitor call usage against limits.
-        </p>
-        <div className="space-y-3">
-          {Object.entries(integrationProviders).length === 0 && (
-            <div className="rounded border border-border/70 p-3 text-xs text-muted-foreground">
-              No integration payload yet. Refresh Site Health.
-            </div>
-          )}
-          {Object.entries(integrationProviders).map(([name, provider]) => (
-            <div key={name} className="rounded border border-border/70 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-foreground">{name}</div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => updateIntegrationProvider(name, { enabled: !provider.enabled })}
-                    className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                      provider.enabled
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border text-muted-foreground"
-                    }`}
-                  >
-                    {provider.enabled ? "Enabled" : "Disabled"}
-                  </button>
-                  <button
-                    onClick={() => updateIntegrationProvider(name, { paused: !provider.paused })}
-                    title="A paused provider keeps its config/key but is skipped by live fetches."
-                    className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                      provider.paused
-                        ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
-                        : "border-border text-muted-foreground"
-                    }`}
-                  >
-                    {provider.paused ? "Paused" : "Not Paused"}
-                  </button>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <div className="space-y-1">
-                  <label className="text-[11px] text-muted-foreground">API Key</label>
-                  <input
-                    value={provider.api_key}
-                    onChange={(event) => updateIntegrationProvider(name, { api_key: event.target.value })}
-                    placeholder={provider.api_key_masked || (provider.api_key_set ? "Configured" : "Not set")}
-                    className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] text-muted-foreground">Call Limit (optional)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={provider.call_limit ?? ""}
-                    onChange={(event) => updateIntegrationProvider(name, {
-                      call_limit: event.target.value ? Math.max(0, Number(event.target.value) || 0) : null,
-                    })}
-                    className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs"
-                    placeholder="No limit"
-                  />
-                </div>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Calls used: {provider.call_count}
-                {provider.call_limit ? ` / ${provider.call_limit}` : ""}
-              </p>
-              <div className="space-y-2">
-                <button
-                  onClick={() => fetchIntegrationHistory(name)}
-                  disabled={historyBusyProvider === name}
-                  className="text-[11px] text-primary hover:text-primary/80 underline disabled:opacity-50"
-                >
-                  {historyBusyProvider === name ? "Loading history..." : "View Errors / Response Times"}
-                </button>
-                {integrationHistory[name] && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <div className="rounded border border-border/60 p-2 space-y-1">
-                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                        Recent Errors
-                      </div>
-                      {integrationHistory[name].errors.length === 0 && (
-                        <p className="text-[10px] text-muted-foreground">None recorded.</p>
-                      )}
-                      {integrationHistory[name].errors.slice().reverse().map((entry, idx) => (
-                        <div key={idx} className="text-[10px] text-destructive font-mono break-words">
-                          {new Date(entry.timestamp * 1000).toLocaleTimeString()}: {entry.message}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="rounded border border-border/60 p-2 space-y-1">
-                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                        Recent Response Times
-                      </div>
-                      {integrationHistory[name].response_times.length === 0 && (
-                        <p className="text-[10px] text-muted-foreground">None recorded.</p>
-                      )}
-                      {integrationHistory[name].response_times.slice().reverse().map((entry, idx) => (
-                        <div key={idx} className="text-[10px] text-muted-foreground font-mono">
-                          {new Date(entry.timestamp * 1000).toLocaleTimeString()}: {entry.elapsed_ms}ms
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={applyIntegrationConfig}
-          disabled={integrationBusy}
-          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60 disabled:opacity-50"
-        >
-          Apply Integration Settings
-        </button>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Diagnostics</h2>
-        <p className="text-xs text-muted-foreground">
-          Runs backend checks and lists warnings like disabled providers, missing keys, or worker issues.
-        </p>
-        <button
-          onClick={runDiagnostics}
-          disabled={diagnoseBusy}
-          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60 disabled:opacity-50"
-        >
-          Run Site Diagnostics
-        </button>
-        <div className="rounded border border-border/70 p-3 text-xs font-mono whitespace-pre-wrap break-words">
-          {diagnostics
-            ? JSON.stringify(diagnostics, null, 2)
-            : "No diagnostics run yet."}
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5">
         <button
           onClick={handleSaveControls}
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground"
         >
           <Save className="h-4 w-4" />
-          Save Control Settings
+          Save Settings
         </button>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          This saves to your profile and applies runtime controls in the current browser session.
-        </p>
-      </section>
+      </div>
 
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <Lock className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Reset Password</h2>
-        </div>
-        <p className="text-xs text-muted-foreground">{user?.email}</p>
-        <button
-          onClick={handleResetPassword}
-          className="px-4 py-2 rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
-        >
-          Send Reset Link
-        </button>
-      </section>
+      <Accordion
+        type="multiple"
+        defaultValue={["health", "api", "scanner", "indicators"]}
+        className="space-y-3"
+      >
+        <AccordionItem value="health" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            <span className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" />
+              Site Health
+            </span>
+          </AccordionTrigger>
+          <AccordionContent className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">Health source: {apiRoot}</p>
+              <button onClick={refreshHealth} className={actionButtonClass}>
+                <RotateCcw className={`h-4 w-4 ${refreshingHealth ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>Health vs Readiness</span>
+              <InfoTip content="Health confirms basic service availability. Readiness confirms the app can process screening requests." />
+            </div>
+            {healthError && <p className="text-sm text-destructive">{healthError}</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-md border border-border/70 p-3 text-sm">
+                <div className="text-muted-foreground">Health</div>
+                <div className="font-mono mt-1">{health?.status ?? "unknown"}</div>
+                <div className="mt-1 text-muted-foreground">Env: {health?.environment ?? "n/a"}</div>
+              </div>
+              <div className="rounded-md border border-border/70 p-3 text-sm">
+                <div className="text-muted-foreground">Readiness</div>
+                <div className="font-mono mt-1">{ready?.status ?? "unknown"}</div>
+                <div className="mt-1 text-muted-foreground">
+                  Worker: {ready?.worker?.running ? "running" : "stopped/degraded"}
+                </div>
+              </div>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
 
-      <section className="rounded-lg border border-border bg-card p-5">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
-        >
-          <LogOut className="h-4 w-4" />
-          Logout
-        </button>
-      </section>
+        <AccordionItem value="runtime" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            Server Runtime Settings
+          </AccordionTrigger>
+          <AccordionContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Live server-side effective configuration.
+            </p>
+            <div className="max-h-64 overflow-auto rounded-md border border-border/70 p-3 text-xs font-mono whitespace-pre-wrap break-words scrollbar-thin">
+              {runtimeSettings
+                ? JSON.stringify(runtimeSettings, null, 2)
+                : "No server runtime payload yet. Press Refresh in Site Health."}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="api" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            API Control
+          </AccordionTrigger>
+          <AccordionContent className="space-y-4">
+            <div className="space-y-1.5">
+              <FieldLabel info="Required only if backend ADMIN_API_TOKEN is configured. Sent as X-Admin-Token for protected ops.">
+                Admin API Token
+              </FieldLabel>
+              <input
+                value={adminApiToken}
+                onChange={(e) => setAdminApiToken(e.target.value)}
+                placeholder="X-Admin-Token"
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel info="Point the UI to another backend environment without changing .env.">
+                API Base Override
+              </FieldLabel>
+              <input
+                value={apiBaseOverride}
+                onChange={(e) => setApiBaseOverride(e.target.value)}
+                placeholder={appEnv.apiBase}
+                className={inputClass}
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <FieldLabel info="Higher timeout helps slow networks; lower timeout fails fast.">
+                  Request Timeout (ms)
+                </FieldLabel>
+                <input
+                  type="number"
+                  min={1000}
+                  step={500}
+                  value={apiTimeoutMs}
+                  onChange={(e) => setApiTimeoutMs(Number(e.target.value) || 48000)}
+                  className={inputClass}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel info="Retries transient network failures. Keep low to avoid duplicate load.">
+                  Retries
+                </FieldLabel>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={apiRetries}
+                  onChange={(e) => setApiRetries(Number(e.target.value) || 0)}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="scanner" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            Scanner Controls
+          </AccordionTrigger>
+          <AccordionContent className="space-y-4">
+            <div className="rounded-md border border-border/70 p-3 text-sm space-y-1">
+              <div>Status: <span className="font-mono">{workerOps?.worker?.running ? "running" : "stopped"}</span></div>
+              <div className="text-muted-foreground">Last run: {workerOps?.worker?.last_run_at ?? "n/a"}</div>
+              <div className="text-muted-foreground">Last success: {workerOps?.worker?.last_success_at ?? "n/a"}</div>
+              {workerOps?.worker?.last_error && (
+                <div className="text-destructive">Last error: {workerOps.worker.last_error}</div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={startWorker} disabled={workerBusy} className={actionButtonClass}>
+                <Play className="h-4 w-4" /> Start
+              </button>
+              <button onClick={stopWorker} disabled={workerBusy} className={actionButtonClass}>
+                <Square className="h-4 w-4" /> Stop
+              </button>
+              <button onClick={refreshWorker} disabled={workerBusy} className={actionButtonClass}>
+                <RotateCcw className={`h-4 w-4 ${workerBusy ? "animate-spin" : ""}`} /> Refresh
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <FieldLabel>Poll Interval (seconds)</FieldLabel>
+                <input
+                  type="number"
+                  min={1}
+                  value={workerPollInterval}
+                  onChange={(e) => setWorkerPollInterval(Number(e.target.value) || 15)}
+                  className={inputClass}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <FieldLabel>Batch Size</FieldLabel>
+                <input
+                  type="number"
+                  min={1}
+                  value={workerBatchSize}
+                  onChange={(e) => setWorkerBatchSize(Number(e.target.value) || 50)}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+            <button onClick={applyWorkerConfig} disabled={workerBusy} className={actionButtonClass}>
+              Apply Worker Config
+            </button>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="indicators" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            Indicator Controls
+          </AccordionTrigger>
+          <AccordionContent className="space-y-4">
+            <div className="space-y-2">
+              <FieldLabel info="Disabled indicators stay usable if already added to a scan; they just drop out of the Add picker.">
+                Enabled Indicators
+              </FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {INDICATOR_DEFINITIONS.map((ind) => {
+                  const isDisabled = (settings.disabledIndicators ?? []).includes(ind.name);
+                  return (
+                    <button
+                      key={ind.name}
+                      onClick={() => toggleDisabledIndicator(ind.name)}
+                      className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                        isDisabled
+                          ? "border-border text-muted-foreground"
+                          : "border-primary/40 bg-primary/10 text-primary"
+                      }`}
+                    >
+                      {INDICATOR_LABELS[ind.name]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel info="Per-indicator thresholds, lengths, and lookback periods used as defaults when adding an indicator.">
+                Indicator Default Parameters (JSON)
+              </FieldLabel>
+              <textarea
+                value={indicatorDefaultsText}
+                onChange={(e) => setIndicatorDefaultsText(e.target.value)}
+                rows={8}
+                spellCheck={false}
+                className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel info="Keys: channel_respect, confluence. Applied as toggle-on defaults for those two filters.">
+                Confluence / Channel Respect Defaults (JSON)
+              </FieldLabel>
+              <textarea
+                value={postFilterDefaultsText}
+                onChange={(e) => setPostFilterDefaultsText(e.target.value)}
+                rows={5}
+                spellCheck={false}
+                className="w-full rounded-md border border-border bg-secondary/40 px-3 py-2 text-xs font-mono"
+              />
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="integrations" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            Integration Controls
+          </AccordionTrigger>
+          <AccordionContent className="space-y-4">
+            <div className="space-y-3">
+              {Object.entries(integrationProviders).length === 0 && (
+                <div className="rounded-md border border-border/70 p-3 text-sm text-muted-foreground">
+                  No integration payload yet. Refresh Site Health.
+                </div>
+              )}
+              {Object.entries(integrationProviders).map(([name, provider]) => (
+                <div key={name} className="rounded-md border border-border/70 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold uppercase tracking-wide text-foreground">{name}</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => updateIntegrationProvider(name, { enabled: !provider.enabled })}
+                        className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                          provider.enabled
+                            ? "border-primary/40 bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {provider.enabled ? "Enabled" : "Disabled"}
+                      </button>
+                      <button
+                        onClick={() => updateIntegrationProvider(name, { paused: !provider.paused })}
+                        className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                          provider.paused
+                            ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {provider.paused ? "Paused" : "Not Paused"}
+                      </button>
+                      <InfoTip content="A paused provider keeps its config/key but is skipped by live fetches." />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <FieldLabel>API Key</FieldLabel>
+                      <input
+                        value={provider.api_key}
+                        onChange={(event) => updateIntegrationProvider(name, { api_key: event.target.value })}
+                        placeholder={provider.api_key_masked || (provider.api_key_set ? "Configured" : "Not set")}
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel>Call Limit (optional)</FieldLabel>
+                      <input
+                        type="number"
+                        min={0}
+                        value={provider.call_limit ?? ""}
+                        onChange={(event) => updateIntegrationProvider(name, {
+                          call_limit: event.target.value ? Math.max(0, Number(event.target.value) || 0) : null,
+                        })}
+                        className={inputClass}
+                        placeholder="No limit"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Calls used: {provider.call_count}
+                    {provider.call_limit ? ` / ${provider.call_limit}` : ""}
+                  </p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => fetchIntegrationHistory(name)}
+                      disabled={historyBusyProvider === name}
+                      className="text-sm text-primary hover:text-primary/80 underline disabled:opacity-50"
+                    >
+                      {historyBusyProvider === name ? "Loading history..." : "View Errors / Response Times"}
+                    </button>
+                    {integrationHistory[name] && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="rounded-md border border-border/60 p-2 space-y-1 max-h-40 overflow-auto scrollbar-thin">
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Recent Errors</div>
+                          {integrationHistory[name].errors.length === 0 && (
+                            <p className="text-xs text-muted-foreground">None recorded.</p>
+                          )}
+                          {integrationHistory[name].errors.slice().reverse().map((entry, idx) => (
+                            <div key={idx} className="text-xs text-destructive font-mono break-words">
+                              {new Date(entry.timestamp * 1000).toLocaleTimeString()}: {entry.message}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="rounded-md border border-border/60 p-2 space-y-1 max-h-40 overflow-auto scrollbar-thin">
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground">Recent Response Times</div>
+                          {integrationHistory[name].response_times.length === 0 && (
+                            <p className="text-xs text-muted-foreground">None recorded.</p>
+                          )}
+                          {integrationHistory[name].response_times.slice().reverse().map((entry, idx) => (
+                            <div key={idx} className="text-xs text-muted-foreground font-mono">
+                              {new Date(entry.timestamp * 1000).toLocaleTimeString()}: {entry.elapsed_ms}ms
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={applyIntegrationConfig} disabled={integrationBusy} className={actionButtonClass}>
+              Apply Integration Settings
+            </button>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="diagnostics" className="rounded-lg border border-border bg-card px-5">
+          <AccordionTrigger className="py-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
+            Diagnostics
+          </AccordionTrigger>
+          <AccordionContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Runs backend checks and lists warnings like disabled providers, missing keys, or worker issues.
+            </p>
+            <button onClick={runDiagnostics} disabled={diagnoseBusy} className={actionButtonClass}>
+              Run Site Diagnostics
+            </button>
+            <div className="max-h-64 overflow-auto rounded-md border border-border/70 p-3 text-xs font-mono whitespace-pre-wrap break-words scrollbar-thin">
+              {diagnostics
+                ? JSON.stringify(diagnostics, null, 2)
+                : "No diagnostics run yet."}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <section className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Reset Password</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">{user?.email}</p>
+          <button
+            onClick={handleResetPassword}
+            className="px-4 py-2.5 rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+          >
+            Send Reset Link
+          </button>
+        </section>
+
+        <section className="rounded-lg border border-border bg-card p-5 flex items-center">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </button>
+        </section>
+      </div>
     </div>
   );
 };

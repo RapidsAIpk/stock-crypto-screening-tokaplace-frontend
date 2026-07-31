@@ -88,6 +88,28 @@
     scrollbar-color: hsl(var(--border)) transparent;
   }
 
+  .scrollbar-sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--sidebar-border) / 0.35) transparent;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-thumb {
+    background: hsl(var(--sidebar-border) / 0.45);
+    border-radius: 999px;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--sidebar-border) / 0.7);
+  }
+
   .glass-panel {
     background: linear-gradient(180deg, hsl(var(--card) / 0.94), hsl(212 30% 9% / 0.9));
     box-shadow: 0 20px 60px hsl(210 40% 3% / 0.35);

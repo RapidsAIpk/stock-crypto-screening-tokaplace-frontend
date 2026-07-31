@@ -5,7 +5,7 @@ import { ConnectionStatus } from "@/components/screener/ConnectionStatus";
 import { FilterSidebar } from "@/components/screener/FilterSidebar";
 import { useScreener } from "@/hooks/useScreener";
 import { useUserSettings } from "@/hooks/useUserSettings";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { appEnv } from "@/config/env";
 
 const API_BASE = appEnv.apiBase.replace(/\/screen$/, "");
@@ -43,7 +43,6 @@ const Index = () => {
           <div className="border-b border-border/70 bg-card/25 px-4 py-3 backdrop-blur-xl md:px-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <SidebarTrigger className="h-10 w-10 rounded-2xl border border-border/70 bg-card/55" />
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.26em] text-muted-foreground">
                     Market Screener

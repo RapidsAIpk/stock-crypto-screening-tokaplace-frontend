@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import { FieldLabel } from "./FilterUi";
+
+const inputClass =
+  "w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed";
 
 interface PresetOrCustomProps {
   label: string;
@@ -47,11 +51,8 @@ export function PresetOrCustomField({
   };
 
   return (
-    <div className={`space-y-1 ${disabled ? "opacity-50" : ""}`}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
-      {usedBy ? (
-        <p className="text-[9px] leading-3 text-muted-foreground/80">Used by: {usedBy}</p>
-      ) : null}
+    <div className={`space-y-1.5 ${disabled ? "opacity-50" : ""}`}>
+      <FieldLabel info={usedBy ? `Used by: ${usedBy}` : undefined}>{label}</FieldLabel>
       <select
         value={showCustom ? "custom" : String(value)}
         disabled={disabled}
@@ -63,7 +64,7 @@ export function PresetOrCustomField({
           setForceCustom(false);
           onChange(Number(e.target.value));
         }}
-        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
+        className={inputClass}
       >
         {presets.map((preset) => (
           <option key={preset} value={preset}>
@@ -81,7 +82,7 @@ export function PresetOrCustomField({
           disabled={disabled}
           onChange={(e) => setRawText(e.target.value)}
           onBlur={commitRawText}
-          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
+          className={inputClass}
           placeholder="Custom value"
         />
       )}
