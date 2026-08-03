@@ -156,6 +156,11 @@ const SettingsPage = () => {
   const [apiRetries, setApiRetries] = useState(settings.apiRetries ?? 0);
   const [workerPollInterval, setWorkerPollInterval] = useState(settings.workerPollInterval ?? 15);
   const [workerBatchSize, setWorkerBatchSize] = useState(settings.workerBatchSize ?? 50);
+  const [screeningMaxSymbols, setScreeningMaxSymbols] = useState<number>(
+    settings.screeningMaxSymbols ?? 75
+  );
+  const [screeningBusy, setScreeningBusy] = useState(false);
+
   const mergedIndicatorDefaultsForEditor = useMemo(() => {
     const base = getAllDefaultIndicatorConfigs();
     const overrides = toInternalIndicatorDefaults(settings.indicatorDefaults ?? {});
@@ -206,9 +211,16 @@ const SettingsPage = () => {
     setApiRetries(settings.apiRetries ?? 0);
     setWorkerPollInterval(settings.workerPollInterval ?? 15);
     setWorkerBatchSize(settings.workerBatchSize ?? 50);
+    setScreeningMaxSymbols(settings.screeningMaxSymbols ?? 75);
     setIndicatorDefaultsText(JSON.stringify(mergedIndicatorDefaultsForEditor, null, 2));
     setPostFilterDefaultsText(JSON.stringify(settings.postFilterDefaults ?? {}, null, 2));
   }, [loading, settings, mergedIndicatorDefaultsForEditor]);
+
+  useEffect(() => {
+    if (runtimeSettings?.screening?.screening_max_symbols !== undefined) {
+      setScreeningMaxSymbols(runtimeSettings.screening.screening_max_symbols);
+    }
+  }, [runtimeSettings]);
 
   const runtimeApiBase = useMemo(() => {
     const selected = apiBaseOverride.trim() || appEnv.apiBase;
@@ -224,6 +236,7 @@ const SettingsPage = () => {
     apiRetries: number;
     workerPollInterval: number;
     workerBatchSize: number;
+    screeningMaxSymbols: number;
     indicatorDefaults: Record<string, Record<string, unknown>>;
     postFilterDefaults: Record<string, unknown>;
   }) => {
@@ -233,6 +246,7 @@ const SettingsPage = () => {
     localStorage.setItem("screener.apiRetries", String(next.apiRetries));
     localStorage.setItem("screener.workerPollInterval", String(next.workerPollInterval));
     localStorage.setItem("screener.workerBatchSize", String(next.workerBatchSize));
+    localStorage.setItem("screener.screeningMaxSymbols", String(next.screeningMaxSymbols));
     localStorage.setItem("screener.indicatorDefaults", JSON.stringify(next.indicatorDefaults));
     localStorage.setItem("screener.postFilterDefaults", JSON.stringify(next.postFilterDefaults));
   };
@@ -387,6 +401,7 @@ const SettingsPage = () => {
     const sanitizedRetries = Math.max(0, Number(apiRetries) || 0);
     const sanitizedPoll = Math.max(1, Number(workerPollInterval) || 15);
     const sanitizedBatch = Math.max(1, Number(workerBatchSize) || 50);
+    const sanitizedMaxSymbols = Math.max(0, Number(screeningMaxSymbols) ?? 75);
 
     const payload = {
       adminApiToken: adminApiToken.trim(),
@@ -395,13 +410,41 @@ const SettingsPage = () => {
       apiRetries: sanitizedRetries,
       workerPollInterval: sanitizedPoll,
       workerBatchSize: sanitizedBatch,
+      screeningMaxSymbols: sanitizedMaxSymbols,
       indicatorDefaults: toInternalIndicatorDefaults(parsedDefaults),
       postFilterDefaults: parsedPostFilterDefaults,
     };
 
     await saveSettings(payload);
     persistRuntimeControls(payload);
+    await applyScreeningConfig(sanitizedMaxSymbols, false);
     toast.success("Control settings applied");
+  };
+
+  const applyScreeningConfig = async (maxSymbolsToApply?: number, showToast = true) => {
+    const val = maxSymbolsToApply !== undefined ? maxSymbolsToApply : Math.max(0, Number(screeningMaxSymbols) ?? 75);
+    setScreeningBusy(true);
+    try {
+      const response = await fetch(`${runtimeApiBase}/ops/screening/config`, {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ screening_max_symbols: val }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to update screening config");
+      }
+      if (showToast) {
+        toast.success(`Screening Max Symbols updated to ${val}`);
+      }
+      refreshHealth();
+    } catch (error) {
+      if (showToast) {
+        toast.error(error instanceof Error ? error.message : "Failed to update screening config");
+      }
+    } finally {
+      setScreeningBusy(false);
+    }
   };
 
   const toggleDisabledIndicator = async (name: string) => {
@@ -754,7 +797,29 @@ const SettingsPage = () => {
                 <RotateCcw className={`h-4 w-4 ${workerBusy ? "animate-spin" : ""}`} /> Refresh
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <FieldLabel info="Maximum symbols to seed and screen. Set 0 for uncapped full market universe.">
+                  SCREENING_MAX_SYMBOLS
+                </FieldLabel>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={screeningMaxSymbols}
+                    onChange={(e) => setScreeningMaxSymbols(Math.max(0, Number(e.target.value) || 0))}
+                    placeholder="75"
+                    className={inputClass}
+                  />
+                  <button
+                    onClick={() => applyScreeningConfig()}
+                    disabled={screeningBusy}
+                    className={actionButtonClass}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <FieldLabel>Poll Interval (seconds)</FieldLabel>
                 <input
@@ -776,9 +841,11 @@ const SettingsPage = () => {
                 />
               </div>
             </div>
-            <button onClick={applyWorkerConfig} disabled={workerBusy} className={actionButtonClass}>
-              Apply Worker Config
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={applyWorkerConfig} disabled={workerBusy} className={actionButtonClass}>
+                Apply Worker Config
+              </button>
+            </div>
           </AccordionContent>
         </AccordionItem>
 
