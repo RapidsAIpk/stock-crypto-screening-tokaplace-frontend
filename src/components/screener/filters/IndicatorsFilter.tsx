@@ -392,7 +392,7 @@ export function IndicatorsFilter({
         <div className="flex flex-wrap gap-2 p-3 rounded-md bg-secondary/50 border border-border">
           {addableIndicators.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              All indicators have been disabled in Settings.
+              No indicators available.
             </p>
           )}
           {addableIndicators.map((ind) => (
