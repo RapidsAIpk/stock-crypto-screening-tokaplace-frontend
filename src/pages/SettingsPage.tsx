@@ -115,7 +115,7 @@ function toInternalIndicatorDefaults(
 }
 
 const SettingsPage = () => {
-  const { user, logout, resetPassword } = useAuth();
+  const { logout, changePassword } = useAuth();
   const { settings, loading, saveSettings } = useUserSettings();
 
   const [apiBaseOverride, setApiBaseOverride] = useState(settings.apiBaseOverride ?? "");
@@ -349,7 +349,7 @@ const SettingsPage = () => {
       return;
     }
 
-    const sanitizedTimeout = Math.max(1000, Number(apiTimeoutMs) || 48000);
+    const sanitizedTimeout = Math.min(300000, Math.max(1000, Number(apiTimeoutMs) || 48000));
     const sanitizedRetries = Math.max(0, Number(apiRetries) || 0);
     const sanitizedPoll = Math.max(1, Number(workerPollInterval) || 15);
     const sanitizedBatch = Math.max(1, Number(workerBatchSize) || 50);
@@ -370,32 +370,6 @@ const SettingsPage = () => {
     persistRuntimeControls(payload);
     await applyScreeningConfig(capEnabled, maxSymbolsInput, false);
     toast.success("Control settings applied");
-  };
-
-  const applyScreeningConfig = async (maxSymbolsToApply?: number, showToast = true) => {
-    const val = maxSymbolsToApply !== undefined ? maxSymbolsToApply : Math.max(0, Number(screeningMaxSymbols) ?? 75);
-    setScreeningBusy(true);
-    try {
-      const response = await fetch(`${runtimeApiBase}/ops/screening/config`, {
-        method: "POST",
-        headers: adminHeaders(),
-        body: JSON.stringify({ screening_max_symbols: val }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Failed to update screening config");
-      }
-      if (showToast) {
-        toast.success(`Screening Max Symbols updated to ${val}`);
-      }
-      refreshHealth();
-    } catch (error) {
-      if (showToast) {
-        toast.error(error instanceof Error ? error.message : "Failed to update screening config");
-      }
-    } finally {
-      setScreeningBusy(false);
-    }
   };
 
   const toggleDisabledIndicator = async (name: string) => {
@@ -463,14 +437,25 @@ const SettingsPage = () => {
     }
   };
 
-  const handleResetPassword = async () => {
-    if (!user?.email) return;
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [changePasswordBusy, setChangePasswordBusy] = useState(false);
 
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword) {
+      toast.error("Enter your current and new password.");
+      return;
+    }
+    setChangePasswordBusy(true);
     try {
-      await resetPassword(user.email);
-      toast.success("Password reset email sent");
-    } catch {
-      toast.error("Failed to send reset email");
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      toast.success("Password changed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to change password");
+    } finally {
+      setChangePasswordBusy(false);
     }
   };
 
@@ -569,15 +554,19 @@ const SettingsPage = () => {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <FieldLabel info="Higher timeout helps slow networks; lower timeout fails fast.">
+              <FieldLabel info="Higher timeout helps slow networks; lower timeout fails fast. Maximum 300s (5 minutes).">
                 Request Timeout (seconds)
               </FieldLabel>
               <input
                 type="number"
                 min={1}
+                max={300}
                 step={1}
                 value={Math.round(apiTimeoutMs / 1000)}
-                onChange={(e) => setApiTimeoutMs(Math.max(1000, (Number(e.target.value) || 48) * 1000))}
+                onChange={(e) => {
+                  const valInSec = Math.min(300, Math.max(1, Number(e.target.value) || 48));
+                  setApiTimeoutMs(valInSec * 1000);
+                }}
                 className={inputClass}
               />
             </div>
@@ -715,15 +704,37 @@ const SettingsPage = () => {
         </SettingsCard>
 
         <SettingsCard
-          title="Reset Password"
+          title="Change Password"
           icon={<Lock className="h-4 w-4 text-primary" />}
           className="md:col-span-1"
         >
+          <div className="space-y-1.5">
+            <FieldLabel>Current Password</FieldLabel>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              className={inputClass}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <FieldLabel>New Password</FieldLabel>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              className={inputClass}
+            />
+          </div>
           <button
-            onClick={handleResetPassword}
-            className="px-4 py-2.5 rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+            onClick={handleChangePassword}
+            disabled={changePasswordBusy}
+            className="px-4 py-2.5 rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
           >
-            Send Reset Link
+            Change Password
           </button>
         </SettingsCard>
 

@@ -1,12 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { appEnv } from "@/config/env";
 import type {
   AssetType, TimeframeMode, ComplianceStatus,
   IndicatorConfig, ChannelRespect, Confluence, PriceRange, DeadAssetsFilter,
 } from "@/types/screener";
+
+const TOKEN_STORAGE_KEY = "screener.authToken";
+
+function apiRoot(): string {
+  const override = localStorage.getItem("screener.apiBaseOverride")?.trim();
+  const base = (override || appEnv.apiBase).replace(/\/+$/, "");
+  return base.replace(/\/screen$/, "");
+}
+
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export interface FilterSnapshot {
   assetType: AssetType;
@@ -93,19 +105,32 @@ export function useUserSettings() {
       return;
     }
 
+    let cancelled = false;
+
     const load = async () => {
       try {
-        const snap = await getDoc(doc(db, "users", user.uid));
-        if (snap.exists()) {
-          setSettings({ ...DEFAULT_SETTINGS, ...snap.data() } as UserSettings);
+        const res = await fetch(`${apiRoot()}/auth/settings`, {
+          headers: authHeaders(),
+        });
+        if (res.ok) {
+          const payload = await res.json();
+          if (!cancelled) {
+            setSettings({ ...DEFAULT_SETTINGS, ...(payload.data ?? {}) } as UserSettings);
+          }
         }
       } catch (e) {
         console.error("Failed to load settings:", e);
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
     load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   const saveSettings = useCallback(
@@ -114,7 +139,14 @@ export function useUserSettings() {
       const updated = { ...settings, ...partial };
       setSettings(updated);
       try {
-        await setDoc(doc(db, "users", user.uid), updated, { merge: true });
+        const res = await fetch(`${apiRoot()}/auth/settings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ data: partial }),
+        });
+        if (!res.ok) {
+          throw new Error("Failed to save settings");
+        }
         toast.success("Settings saved");
       } catch (e) {
         console.error("Failed to save settings:", e);

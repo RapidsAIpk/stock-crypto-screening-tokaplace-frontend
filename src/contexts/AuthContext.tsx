@@ -1,146 +1,211 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
-import type { User } from "firebase/auth";
-
-// ===========================================================================
-// TEMPORARY MOCK AUTH
-// Firebase project access isn't available yet (login was failing with a 400
-// from identitytoolkit.googleapis.com — unrelated to this app's own code).
-// This mock lets people through the login screen without a real Firebase
-// account so the site is usable while that gets sorted out.
-//
-// Known limitation: Save Preset / Watchlist / Settings persistence go
-// straight to Firestore keyed by the real Firebase UID, and Firestore itself
-// requires a genuine Firebase Auth token — a mock user here does not satisfy
-// that, so those features will still show "Failed to save" while this mock
-// is active. That's expected, not a new bug.
-//
-// To restore real auth: delete this whole mock block, then uncomment the
-// original implementation below it.
-// ===========================================================================
-
-interface AuthContextType {
-  user: User | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
-
-function createMockUser(email: string): User {
-  return {
-    uid: "mock-user",
-    email,
-    emailVerified: true,
-    isAnonymous: false,
-    displayName: null,
-    photoURL: null,
-    phoneNumber: null,
-    providerId: "password",
-    metadata: {},
-    providerData: [],
-    refreshToken: "",
-    tenantId: null,
-    delete: async () => {},
-    getIdToken: async () => "mock-token",
-    getIdTokenResult: async () => ({}) as never,
-    reload: async () => {},
-    toJSON: () => ({}),
-  } as unknown as User;
-}
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading] = useState(false);
-
-  const signIn = async (email: string, _password: string) => {
-    setUser(createMockUser(email));
-  };
-
-  const signUp = async (email: string, _password: string) => {
-    setUser(createMockUser(email));
-  };
-
-  const logout = async () => {
-    setUser(null);
-  };
-
-  const resetPassword = async (_email: string) => {
-    // Mock: no email is actually sent while Firebase access is unavailable.
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, logout, resetPassword }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
-}
-
-// ===========================================================================
-// ORIGINAL FIREBASE-BACKED IMPLEMENTATION — commented out temporarily.
-// Restore by deleting the mock block above and uncommenting everything below.
-// ===========================================================================
-/*
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  type User,
-} from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { appEnv } from "@/config/env";
+
+export interface AuthUser {
+  uid: string;
+  email: string;
+}
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    securityQuestion: string,
+    securityAnswer: string,
+  ) => Promise<void>;
   logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
+  getSecurityQuestion: (email: string) => Promise<string>;
+  /** Forgot-password flow (logged out): verify the security answer, then set a new password. */
+  resetPassword: (email: string, securityAnswer: string, newPassword: string) => Promise<void>;
+  /** Logged-in flow: verify the current password, then set a new one. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+const TOKEN_STORAGE_KEY = "screener.authToken";
+
+// Auth lives under the API root (e.g. https://host), not under /screen -
+// the runtime API base used for screening calls is /screen-suffixed.
+function apiRoot(): string {
+  const override = localStorage.getItem("screener.apiBaseOverride")?.trim();
+  const base = (override || appEnv.apiBase).replace(/\/+$/, "");
+  return base.replace(/\/screen$/, "");
+}
+
+function authToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data?.detail === "string") {
+      return data.detail;
+    }
+  } catch {
+    // fall through to default message
+  }
+  return fallback;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return unsubscribe;
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      const token = authToken();
+      if (!token) {
+        if (!cancelled) {
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const res = await fetch(`${apiRoot()}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          throw new Error("Session invalid");
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setUser({ uid: data.user.user_id, email: data.user.email });
+        }
+      } catch {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    restoreSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    const res = await fetch(`${apiRoot()}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res, "Invalid email or password."));
+    }
+    const data = await res.json();
+    localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+    setUser({ uid: data.user.user_id, email: data.user.email });
   };
 
-  const signUp = async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(auth, email, password);
+  const signUp = async (
+    email: string,
+    password: string,
+    securityQuestion: string,
+    securityAnswer: string,
+  ) => {
+    const res = await fetch(`${apiRoot()}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password,
+        security_question: securityQuestion,
+        security_answer: securityAnswer,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res, "Failed to create account."));
+    }
+    const data = await res.json();
+    localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+    setUser({ uid: data.user.user_id, email: data.user.email });
   };
 
   const logout = async () => {
-    await signOut(auth);
+    const token = authToken();
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setUser(null);
+
+    if (token) {
+      try {
+        await fetch(`${apiRoot()}/auth/logout`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
+        // Best-effort server-side session cleanup; the client has already
+        // forgotten the token either way.
+      }
+    }
   };
 
-  const resetPassword = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
+  const getSecurityQuestion = async (email: string): Promise<string> => {
+    const res = await fetch(
+      `${apiRoot()}/auth/security-question?email=${encodeURIComponent(email)}`,
+    );
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res, "No account found for that email."));
+    }
+    const data = await res.json();
+    return data.question as string;
+  };
+
+  const resetPassword = async (email: string, securityAnswer: string, newPassword: string) => {
+    const res = await fetch(`${apiRoot()}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        security_answer: securityAnswer,
+        new_password: newPassword,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res, "Failed to reset password."));
+    }
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const token = authToken();
+    const res = await fetch(`${apiRoot()}/auth/change-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res, "Failed to change password."));
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, logout, resetPassword }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        signIn,
+        signUp,
+        logout,
+        getSecurityQuestion,
+        resetPassword,
+        changePassword,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -151,4 +216,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
-*/

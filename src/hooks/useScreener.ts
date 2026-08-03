@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type {
   AssetType,
   CryptoExchangeOption,
@@ -62,7 +62,11 @@ function runtimeApiBase(): string {
 
 function runtimeTimeoutMs(): number {
   const parsed = Number(localStorage.getItem("screener.apiTimeoutMs") || "");
-  return Number.isFinite(parsed) && parsed >= 1000 ? parsed : 48000;
+  const fallback = 48000;
+  if (!Number.isFinite(parsed) || parsed < 1000) {
+    return fallback;
+  }
+  return Math.min(300000, Math.max(1000, parsed));
 }
 
 function runtimeRetries(): number {
@@ -270,6 +274,20 @@ export function useScreener() {
   const [lastResultContext, setLastResultContext] =
     useState<ResultContext | null>(null);
 
+  // Guards against two scans running concurrently (e.g. a fast double-click
+  // before the "loading" state re-render disables the button): setState is
+  // async, but a ref update is immediate, so this is checked synchronously
+  // at the top of every run* function.
+  const isBusyRef = useRef(false);
+
+  // Bumped by resetGateEntry (called by every filter setter). A run*
+  // function captures this value before its request goes out; if it no
+  // longer matches when the response lands, the filters changed mid-flight
+  // and the response is stale - it must be discarded instead of re-arming
+  // gate/entry state or overwriting results for a configuration that's no
+  // longer displayed.
+  const filterGenerationRef = useRef(0);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -414,6 +432,7 @@ export function useScreener() {
   // -------------------------------------------------------
 
   const resetGateEntry = useCallback(() => {
+    filterGenerationRef.current += 1;
     setGateCompleted(false);
     setEntryCompleted(false);
     setGateSessionId(null);
@@ -696,9 +715,14 @@ export function useScreener() {
 
   const runSingle = useCallback(async () => {
 
+    if (isBusyRef.current) {
+      return;
+    }
+    isBusyRef.current = true;
     setLoading(true);
     setErrorMessage("");
     const scanId = await beginScan();
+    const myFilterGeneration = filterGenerationRef.current;
 
     try {
 
@@ -706,6 +730,12 @@ export function useScreener() {
       body.timeframe_mode = "single";
 
       const data = await callAPI<{ results?: ScreenerResult[] }>("run", body, { scanId });
+
+      if (filterGenerationRef.current !== myFilterGeneration) {
+        // Filters changed while this request was in flight - discard the
+        // stale response instead of overwriting the current configuration.
+        return;
+      }
 
       setResults(data.results || []);
       setLastResultContext({
@@ -719,12 +749,15 @@ export function useScreener() {
       );
 
     } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : "Backend unavailable");
+      if (filterGenerationRef.current === myFilterGeneration) {
+        setErrorMessage(e instanceof Error ? e.message : "Backend unavailable");
+      }
 
     } finally {
 
       endScan();
       setLoading(false);
+      isBusyRef.current = false;
 
     }
 
@@ -737,16 +770,28 @@ export function useScreener() {
 
   const runGate = useCallback(async () => {
 
+    if (isBusyRef.current) {
+      return;
+    }
+    isBusyRef.current = true;
     setLoading(true);
     setErrorMessage("");
     setEntryCompleted(false);
     const scanId = await beginScan();
+    const myFilterGeneration = filterGenerationRef.current;
 
     try {
       validateGateEntryTimeframes();
       const body = buildGateBody();
 
       const data = await callAPI<{ results?: ScreenerResult[]; gate_session_id?: string | null }>("run-gate", body, { scanId });
+
+      if (filterGenerationRef.current !== myFilterGeneration) {
+        // Filters changed while the gate request was in flight - applying
+        // this now would re-arm Entry against a gate session that no
+        // longer matches the currently displayed filters.
+        return;
+      }
 
       const count = data.results?.length || 0;
       const sessionId = data.gate_session_id ?? null;
@@ -766,12 +811,15 @@ export function useScreener() {
       );
 
     } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : "Gate scan failed");
+      if (filterGenerationRef.current === myFilterGeneration) {
+        setErrorMessage(e instanceof Error ? e.message : "Gate scan failed");
+      }
 
     } finally {
 
       endScan();
       setLoading(false);
+      isBusyRef.current = false;
 
     }
 
@@ -784,19 +832,29 @@ export function useScreener() {
 
   const runEntry = useCallback(async () => {
 
+    if (isBusyRef.current) {
+      return;
+    }
+
     if (!gateCompleted || !gateSessionId) {
       setErrorMessage("Run Gate before Entry.");
       return;
     }
 
+    isBusyRef.current = true;
     setLoading(true);
     setErrorMessage("");
     const scanId = await beginScan();
+    const myFilterGeneration = filterGenerationRef.current;
 
     try {
       validateGateEntryTimeframes();
       const body = buildEntryBody(gateSessionId);
       const data = await callAPI<{ results?: ScreenerResult[] }>("run-entry", body, { scanId });
+
+      if (filterGenerationRef.current !== myFilterGeneration) {
+        return;
+      }
 
       const count = data.results?.length || 0;
 
@@ -814,12 +872,15 @@ export function useScreener() {
       );
 
     } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : "Entry scan failed");
+      if (filterGenerationRef.current === myFilterGeneration) {
+        setErrorMessage(e instanceof Error ? e.message : "Entry scan failed");
+      }
 
     } finally {
 
       endScan();
       setLoading(false);
+      isBusyRef.current = false;
 
     }
 
@@ -834,16 +895,28 @@ export function useScreener() {
   ]);
 
   const runGateEntry = useCallback(async () => {
+    if (isBusyRef.current) {
+      return;
+    }
+    isBusyRef.current = true;
     setLoading(true);
     setErrorMessage("");
     setEntryCompleted(false);
     const scanId = await beginScan();
+    const myFilterGeneration = filterGenerationRef.current;
 
     try {
       validateGateEntryTimeframes();
 
       const gateBody = buildGateBody();
       const gateData = await callAPI<{ results?: ScreenerResult[]; gate_session_id?: string | null }>("run-gate", gateBody, { scanId });
+
+      if (filterGenerationRef.current !== myFilterGeneration) {
+        // Filters changed mid-flight - stop before firing Entry against a
+        // gate session that no longer corresponds to the current config.
+        return;
+      }
+
       const gateResults = gateData.results || [];
       const gateSession = gateData.gate_session_id ?? null;
       const gateResultsCount = gateResults.length;
@@ -867,6 +940,11 @@ export function useScreener() {
 
       const entryBody = buildEntryBody(gateSession);
       const entryData = await callAPI<{ results?: ScreenerResult[] }>("run-entry", entryBody, { scanId });
+
+      if (filterGenerationRef.current !== myFilterGeneration) {
+        return;
+      }
+
       const entryResults = entryData.results || [];
       const entryResultsCount = entryResults.length;
 
@@ -880,10 +958,13 @@ export function useScreener() {
       });
       setStatusMessage(`Gate completed (${gateResultsCount}) -> Entry completed (${entryResultsCount}).`);
     } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : "Gate-entry scan failed");
+      if (filterGenerationRef.current === myFilterGeneration) {
+        setErrorMessage(e instanceof Error ? e.message : "Gate-entry scan failed");
+      }
     } finally {
       endScan();
       setLoading(false);
+      isBusyRef.current = false;
     }
   }, [
     beginScan,
