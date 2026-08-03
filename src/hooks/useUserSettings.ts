@@ -55,6 +55,7 @@ export interface UserSettings {
   apiRetries: number;
   workerPollInterval: number;
   workerBatchSize: number;
+  screeningMaxSymbols: number;
   timezone: string;
   indicatorDefaults: Record<string, Record<string, unknown>>;
   presets: FilterPreset[];
@@ -71,6 +72,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   apiRetries: 0,
   workerPollInterval: 15,
   workerBatchSize: 50,
+  screeningMaxSymbols: 75,
   timezone: "UTC",
   indicatorDefaults: {},
   presets: [],

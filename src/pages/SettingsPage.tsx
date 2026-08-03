@@ -7,6 +7,7 @@ import { appEnv } from "@/config/env";
 import { getAllDefaultIndicatorConfigs } from "@/types/screener";
 import { InfoTip } from "@/components/ui/info-tip";
 import { FieldLabel } from "@/components/screener/filters/FilterUi";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 function SettingsCard({
@@ -123,6 +124,14 @@ const SettingsPage = () => {
   const [apiRetries, setApiRetries] = useState(settings.apiRetries ?? 0);
   const [workerPollInterval, setWorkerPollInterval] = useState(settings.workerPollInterval ?? 15);
   const [workerBatchSize, setWorkerBatchSize] = useState(settings.workerBatchSize ?? 50);
+  const [capEnabled, setCapEnabled] = useState<boolean>(
+    (settings.screeningMaxSymbols ?? 0) > 0
+  );
+  const [maxSymbolsInput, setMaxSymbolsInput] = useState<number>(
+    (settings.screeningMaxSymbols ?? 0) > 0 ? settings.screeningMaxSymbols : 75
+  );
+  const [screeningBusy, setScreeningBusy] = useState(false);
+
   const mergedIndicatorDefaultsForEditor = useMemo(() => {
     const base = getAllDefaultIndicatorConfigs();
     const overrides = toInternalIndicatorDefaults(settings.indicatorDefaults ?? {});
@@ -164,8 +173,25 @@ const SettingsPage = () => {
     setApiRetries(settings.apiRetries ?? 0);
     setWorkerPollInterval(settings.workerPollInterval ?? 15);
     setWorkerBatchSize(settings.workerBatchSize ?? 50);
+    const initialCap = (settings.screeningMaxSymbols ?? 0) > 0;
+    setCapEnabled(initialCap);
+    if (initialCap) {
+      setMaxSymbolsInput(settings.screeningMaxSymbols);
+    }
     setIndicatorDefaultsText(JSON.stringify(mergedIndicatorDefaultsForEditor, null, 2));
   }, [loading, settings, mergedIndicatorDefaultsForEditor]);
+
+  useEffect(() => {
+    if (runtimeSettings?.screening?.screening_max_symbols !== undefined) {
+      const serverVal = runtimeSettings.screening.screening_max_symbols;
+      if (serverVal > 0) {
+        setCapEnabled(true);
+        setMaxSymbolsInput(serverVal);
+      } else {
+        setCapEnabled(false);
+      }
+    }
+  }, [runtimeSettings]);
 
   const runtimeApiBase = useMemo(() => {
     const selected = apiBaseOverride.trim() || appEnv.apiBase;
@@ -181,6 +207,7 @@ const SettingsPage = () => {
     apiRetries: number;
     workerPollInterval: number;
     workerBatchSize: number;
+    screeningMaxSymbols: number;
     indicatorDefaults: Record<string, Record<string, unknown>>;
   }) => {
     localStorage.setItem("screener.adminApiToken", next.adminApiToken.trim());
@@ -189,7 +216,38 @@ const SettingsPage = () => {
     localStorage.setItem("screener.apiRetries", String(next.apiRetries));
     localStorage.setItem("screener.workerPollInterval", String(next.workerPollInterval));
     localStorage.setItem("screener.workerBatchSize", String(next.workerBatchSize));
+    localStorage.setItem("screener.screeningMaxSymbols", String(next.screeningMaxSymbols));
     localStorage.setItem("screener.indicatorDefaults", JSON.stringify(next.indicatorDefaults));
+  };
+
+  const applyScreeningConfig = async (enabled: boolean, valInput: number, showToast = true) => {
+    const effectiveVal = enabled ? Math.max(1, Number(valInput) || 75) : 0;
+    setScreeningBusy(true);
+    try {
+      const response = await fetch(`${runtimeApiBase}/ops/screening/config`, {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ screening_max_symbols: effectiveVal }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to update screening config");
+      }
+      if (showToast) {
+        if (effectiveVal === 0) {
+          toast.success("Symbol cap turned OFF. Using entire market universe.");
+        } else {
+          toast.success(`Symbol cap set to ${effectiveVal} symbols.`);
+        }
+      }
+      refreshHealth();
+    } catch (error) {
+      if (showToast) {
+        toast.error(error instanceof Error ? error.message : "Failed to update screening config");
+      }
+    } finally {
+      setScreeningBusy(false);
+    }
   };
 
   const adminHeaders = () => ({
@@ -295,6 +353,7 @@ const SettingsPage = () => {
     const sanitizedRetries = Math.max(0, Number(apiRetries) || 0);
     const sanitizedPoll = Math.max(1, Number(workerPollInterval) || 15);
     const sanitizedBatch = Math.max(1, Number(workerBatchSize) || 50);
+    const effectiveMaxSymbols = capEnabled ? Math.max(1, Number(maxSymbolsInput) || 75) : 0;
 
     const payload = {
       adminApiToken: adminApiToken.trim(),
@@ -303,11 +362,13 @@ const SettingsPage = () => {
       apiRetries: sanitizedRetries,
       workerPollInterval: sanitizedPoll,
       workerBatchSize: sanitizedBatch,
+      screeningMaxSymbols: effectiveMaxSymbols,
       indicatorDefaults: toInternalIndicatorDefaults(parsedDefaults),
     };
 
     await saveSettings(payload);
     persistRuntimeControls(payload);
+    await applyScreeningConfig(capEnabled, maxSymbolsInput, false);
     toast.success("Control settings applied");
   };
 
@@ -475,14 +536,14 @@ const SettingsPage = () => {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <FieldLabel info="Higher timeout helps slow networks; lower timeout fails fast.">
-                Request Timeout (ms)
+                Request Timeout (seconds)
               </FieldLabel>
               <input
                 type="number"
-                min={1000}
-                step={500}
-                value={apiTimeoutMs}
-                onChange={(e) => setApiTimeoutMs(Number(e.target.value) || 48000)}
+                min={1}
+                step={1}
+                value={Math.round(apiTimeoutMs / 1000)}
+                onChange={(e) => setApiTimeoutMs(Math.max(1000, (Number(e.target.value) || 48) * 1000))}
                 className={inputClass}
               />
             </div>
@@ -522,6 +583,52 @@ const SettingsPage = () => {
               <RotateCcw className={`h-4 w-4 ${workerBusy ? "animate-spin" : ""}`} /> Refresh
             </button>
           </div>
+          <div className="space-y-2 rounded-md border border-border/70 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <FieldLabel info="Limit max symbols screened per run to save bandwidth, or turn off to screen the entire market universe.">
+                  SCREENING_MAX_SYMBOLS
+                </FieldLabel>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {capEnabled ? "Symbol limit active" : "Entire universe mode active"}
+                </p>
+              </div>
+              <Switch
+                checked={capEnabled}
+                onCheckedChange={(checked) => {
+                  setCapEnabled(checked);
+                  applyScreeningConfig(checked, maxSymbolsInput);
+                }}
+                disabled={screeningBusy}
+              />
+            </div>
+
+            {capEnabled ? (
+              <div className="flex gap-2 pt-1">
+                <input
+                  type="number"
+                  min={1}
+                  value={maxSymbolsInput}
+                  onChange={(e) => setMaxSymbolsInput(Math.max(1, Number(e.target.value) || 1))}
+                  placeholder="e.g. 75"
+                  className={inputClass}
+                />
+                <button
+                  onClick={() => applyScreeningConfig(true, maxSymbolsInput)}
+                  disabled={screeningBusy}
+                  className={actionButtonClass}
+                >
+                  Apply
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-md bg-secondary/60 px-3 py-2 text-xs font-medium text-emerald-500 flex items-center justify-between">
+                <span>Entire Universe (Uncapped)</span>
+                <span className="font-mono text-[10px] uppercase bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Active</span>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <FieldLabel>Poll Interval (seconds)</FieldLabel>
