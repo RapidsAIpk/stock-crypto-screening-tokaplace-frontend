@@ -196,7 +196,7 @@ const AuthPage = () => {
               Create Account
             </h2>
             <p className="text-xs text-muted-foreground text-center">
-              Limited to 2 accounts total. An invite key is required.
+              An invite key is required to create an account.
             </p>
             <div className="space-y-1">
               <label htmlFor="signup-email" className={labelClass}>Email</label>
