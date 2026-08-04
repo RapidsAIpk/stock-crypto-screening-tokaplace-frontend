@@ -393,7 +393,8 @@ export function useScreener() {
       compliance_status: assetType === "stocks"
         ? complianceStatus
         : null,
-      compliance_standards: null,
+      // Zoya only grades against AAOIFI today; other standards stay disabled in the UI.
+      compliance_standards: assetType === "stocks" ? ["AAOIFI"] : null,
       asset_categories: assetType === "stocks"
         ? (assetCategories.length ? assetCategories : null)
         : null,

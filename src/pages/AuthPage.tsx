@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Activity, Loader2, Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-
-type Mode = "signin" | "signup" | "forgot-email" | "forgot-reset";
+import { deleteUser } from "firebase/auth";
+import { appEnv } from "@/config/env";
 
 const inputClass =
   "w-full bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
@@ -12,48 +12,66 @@ const primaryButtonClass =
   "w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50";
 const linkButtonClass = "text-xs text-muted-foreground hover:text-foreground transition-colors";
 
+function apiRoot(): string {
+  const override = localStorage.getItem("screener.apiBaseOverride")?.trim();
+  const base = (override || appEnv.apiBase).replace(/\/+$/, "");
+  return base.replace(/\/screen$/, "");
+}
+
 const AuthPage = () => {
-  const { user, signIn, signUp, getSecurityQuestion, resetPassword } = useAuth();
+  const { user, signIn, signUp, resetPassword } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<Mode>("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [securityQuestion, setSecurityQuestion] = useState("");
-  const [securityAnswer, setSecurityAnswer] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotQuestion, setForgotQuestion] = useState("");
-  const [forgotAnswer, setForgotAnswer] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-
+  const [inviteKey, setInviteKey] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
+  // Redirect if already authenticated
   useEffect(() => {
     if (user) navigate("/", { replace: true });
   }, [user, navigate]);
 
-  const resetMessages = () => {
-    setError("");
-    setMessage("");
+  const describeFirebaseError = (err: unknown, fallback: string) => {
+    const firebaseErr = err as { code?: string; message?: string };
+    const code = firebaseErr?.code || "";
+    if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
+      return "Invalid email or password.";
+    }
+    if (code === "auth/email-already-in-use") {
+      return "Email already in use.";
+    }
+    if (code === "auth/weak-password") {
+      return "Password must be at least 6 characters.";
+    }
+    if (code === "auth/too-many-requests") {
+      return "Too many attempts. Please try again later.";
+    }
+    if (code === "auth/invalid-email") {
+      return "Please enter a valid email address.";
+    }
+    return firebaseErr?.message || fallback;
   };
 
-  const switchMode = (next: Mode) => {
-    resetMessages();
+  const switchMode = (next: "signin" | "signup" | "reset") => {
+    setError("");
+    setMessage("");
     setMode(next);
   };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    resetMessages();
+    setError("");
+    setMessage("");
     setLoading(true);
     try {
       await signIn(email, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed.");
+      setError(describeFirebaseError(err, "Authentication failed."));
     } finally {
       setLoading(false);
     }
@@ -61,54 +79,66 @@ const AuthPage = () => {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    resetMessages();
-    if (!securityQuestion.trim() || !securityAnswer.trim()) {
-      setError("Security question and answer are required.");
+    setError("");
+    setMessage("");
+    if (!inviteKey.trim()) {
+      setError("Invite key is required.");
       return;
     }
     setLoading(true);
+
+    let createdUser: Awaited<ReturnType<typeof signUp>> | null = null;
     try {
-      await signUp(email, password, securityQuestion.trim(), securityAnswer.trim());
+      createdUser = await signUp(email, password);
+
+      const res = await fetch(`${apiRoot()}/auth/register-account`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: createdUser.uid,
+          email: createdUser.email,
+          invite_key: inviteKey.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "Failed to register account.");
+      }
+      // Success: onAuthStateChanged picks up the signed-in user and the
+      // redirect effect above sends them into the app.
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create account.");
+      // Roll back the Firebase account if it was created but the backend
+      // rejected it (bad invite key, or the 2-account cap was already
+      // reached) - a user can always delete their own freshly-created
+      // account, no admin rights required.
+      if (createdUser) {
+        try {
+          await deleteUser(createdUser);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      setError(err instanceof Error ? err.message : describeFirebaseError(err, "Failed to create account."));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleForgotEmailSubmit = async (e: React.FormEvent) => {
+  const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    resetMessages();
-    if (!forgotEmail.trim()) {
+    if (!email.trim()) {
       setError("Please enter your email address.");
       return;
     }
+    setError("");
+    setMessage("");
     setLoading(true);
     try {
-      const question = await getSecurityQuestion(forgotEmail.trim());
-      setForgotQuestion(question);
-      setMode("forgot-reset");
+      await resetPassword(email);
+      setMessage("Password reset email sent. Check your inbox.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No account found for that email.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleForgotResetSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    resetMessages();
-    setLoading(true);
-    try {
-      await resetPassword(forgotEmail.trim(), forgotAnswer, newPassword);
-      setEmail(forgotEmail.trim());
-      setPassword("");
-      setForgotAnswer("");
-      setNewPassword("");
-      setMode("signin");
-      setMessage("Password updated. You can now sign in.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reset password.");
+      setError(describeFirebaseError(err, "Failed to send reset email."));
     } finally {
       setLoading(false);
     }
@@ -121,22 +151,20 @@ const AuthPage = () => {
     </div>
   );
 
-  if (mode === "forgot-email") {
+  if (mode === "reset") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
         <div className="w-full max-w-sm space-y-6">
           <Header />
-          <form onSubmit={handleForgotEmailSubmit} className="rounded-lg border border-border bg-card p-6 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-center">
-              Forgot Password
-            </h2>
+          <form onSubmit={handleReset} className="rounded-lg border border-border bg-card p-6 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-center">Reset Password</h2>
             <div className="space-y-1">
-              <label htmlFor="forgot-email" className={labelClass}>Email</label>
+              <label htmlFor="reset-email" className={labelClass}>Email</label>
               <input
-                id="forgot-email"
+                id="reset-email"
                 type="email"
-                value={forgotEmail}
-                onChange={(e) => setForgotEmail(e.target.value)}
+                value={email}
+                onChange={e => setEmail(e.target.value)}
                 required
                 autoComplete="email"
                 className={inputClass}
@@ -144,61 +172,13 @@ const AuthPage = () => {
               />
             </div>
             {error && <p className="text-xs text-destructive font-mono" role="alert">{error}</p>}
+            {message && <p className="text-xs text-primary font-mono" role="status">{message}</p>}
             <button type="submit" disabled={loading} className={primaryButtonClass}>
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Continue
+              Send Reset Link
             </button>
             <button type="button" onClick={() => switchMode("signin")} className={`w-full ${linkButtonClass}`}>
               Back to login
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  if (mode === "forgot-reset") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="w-full max-w-sm space-y-6">
-          <Header />
-          <form onSubmit={handleForgotResetSubmit} className="rounded-lg border border-border bg-card p-6 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-center">
-              Answer Security Question
-            </h2>
-            <p className="text-sm text-foreground">{forgotQuestion}</p>
-            <div className="space-y-1">
-              <label htmlFor="forgot-answer" className={labelClass}>Answer</label>
-              <input
-                id="forgot-answer"
-                type="text"
-                value={forgotAnswer}
-                onChange={(e) => setForgotAnswer(e.target.value)}
-                required
-                className={inputClass}
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="forgot-new-password" className={labelClass}>New Password</label>
-              <input
-                id="forgot-new-password"
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={8}
-                autoComplete="new-password"
-                className={inputClass}
-                placeholder="••••••••"
-              />
-            </div>
-            {error && <p className="text-xs text-destructive font-mono" role="alert">{error}</p>}
-            <button type="submit" disabled={loading} className={primaryButtonClass}>
-              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Set New Password
-            </button>
-            <button type="button" onClick={() => switchMode("forgot-email")} className={`w-full ${linkButtonClass}`}>
-              Back
             </button>
           </form>
         </div>
@@ -216,7 +196,7 @@ const AuthPage = () => {
               Create Account
             </h2>
             <p className="text-xs text-muted-foreground text-center">
-              Limited to 2 accounts total.
+              Limited to 2 accounts total. An invite key is required.
             </p>
             <div className="space-y-1">
               <label htmlFor="signup-email" className={labelClass}>Email</label>
@@ -224,7 +204,7 @@ const AuthPage = () => {
                 id="signup-email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={e => setEmail(e.target.value)}
                 required
                 autoComplete="email"
                 className={inputClass}
@@ -238,9 +218,9 @@ const AuthPage = () => {
                   id="signup-password"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={e => setPassword(e.target.value)}
                   required
-                  minLength={8}
+                  minLength={6}
                   autoComplete="new-password"
                   className={`${inputClass} pr-10`}
                   placeholder="••••••••"
@@ -257,30 +237,16 @@ const AuthPage = () => {
               </div>
             </div>
             <div className="space-y-1">
-              <label htmlFor="signup-question" className={labelClass}>Security Question</label>
+              <label htmlFor="signup-invite-key" className={labelClass}>Invite Key</label>
               <input
-                id="signup-question"
+                id="signup-invite-key"
                 type="text"
-                value={securityQuestion}
-                onChange={(e) => setSecurityQuestion(e.target.value)}
+                value={inviteKey}
+                onChange={e => setInviteKey(e.target.value)}
                 required
                 className={inputClass}
-                placeholder="e.g. What was your first pet's name?"
+                placeholder="Provided to you separately"
               />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="signup-answer" className={labelClass}>Security Answer</label>
-              <input
-                id="signup-answer"
-                type="text"
-                value={securityAnswer}
-                onChange={(e) => setSecurityAnswer(e.target.value)}
-                required
-                className={inputClass}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Used to recover your account if you forget your password. Choose something only you would know.
-              </p>
             </div>
             {error && <p className="text-xs text-destructive font-mono" role="alert">{error}</p>}
             <button type="submit" disabled={loading} className={primaryButtonClass}>
@@ -310,7 +276,7 @@ const AuthPage = () => {
               id="auth-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={e => setEmail(e.target.value)}
               required
               autoComplete="email"
               className={inputClass}
@@ -324,9 +290,9 @@ const AuthPage = () => {
                 id="auth-password"
                 type={showPassword ? "text" : "password"}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={e => setPassword(e.target.value)}
                 required
-                minLength={8}
+                minLength={6}
                 autoComplete="current-password"
                 className={`${inputClass} pr-10`}
                 placeholder="••••••••"
@@ -352,14 +318,7 @@ const AuthPage = () => {
             <button type="button" onClick={() => switchMode("signup")} className={linkButtonClass}>
               Create account
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setForgotEmail(email);
-                switchMode("forgot-email");
-              }}
-              className={linkButtonClass}
-            >
+            <button type="button" onClick={() => switchMode("reset")} className={linkButtonClass}>
               Forgot password?
             </button>
           </div>

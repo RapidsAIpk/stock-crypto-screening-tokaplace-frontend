@@ -7,17 +7,14 @@ import type {
   IndicatorConfig, ChannelRespect, Confluence, PriceRange, DeadAssetsFilter,
 } from "@/types/screener";
 
-const TOKEN_STORAGE_KEY = "screener.authToken";
-
 function apiRoot(): string {
   const override = localStorage.getItem("screener.apiBaseOverride")?.trim();
   const base = (override || appEnv.apiBase).replace(/\/+$/, "");
   return base.replace(/\/screen$/, "");
 }
 
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+function userHeaders(uid: string | undefined): Record<string, string> {
+  return uid ? { "X-User-Id": uid } : {};
 }
 
 export interface FilterSnapshot {
@@ -110,7 +107,7 @@ export function useUserSettings() {
     const load = async () => {
       try {
         const res = await fetch(`${apiRoot()}/auth/settings`, {
-          headers: authHeaders(),
+          headers: userHeaders(user.uid),
         });
         if (res.ok) {
           const payload = await res.json();
@@ -141,7 +138,7 @@ export function useUserSettings() {
       try {
         const res = await fetch(`${apiRoot()}/auth/settings`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
+          headers: { "Content-Type": "application/json", ...userHeaders(user.uid) },
           body: JSON.stringify({ data: partial }),
         });
         if (!res.ok) {

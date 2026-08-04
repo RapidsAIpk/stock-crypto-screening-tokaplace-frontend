@@ -192,6 +192,7 @@ export interface ScreenerResult {
   cmc_id?: number | null;
   rank?: number | null;
   compliance_status?: string | null;
+  compliance_standard?: string | null;
   report_date?: string | null;
   purification_ratio?: number | null;
   candles_count?: number | null;

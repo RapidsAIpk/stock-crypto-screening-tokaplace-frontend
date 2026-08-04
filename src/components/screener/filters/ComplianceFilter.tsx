@@ -60,23 +60,37 @@ export function ComplianceFilter({ status, onStatusChange }: Props) {
           />
         </button>
         {standardsOpen && (
-          <div id="compliance-standards" className="flex flex-wrap gap-2">
-            {standards.map((standard) => (
-              <button
-                type="button"
-                disabled
-                aria-disabled="true"
-                aria-pressed={standard === "AAOIFI"}
-              key={standard}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${
-                standard === "AAOIFI"
-                  ? "border-primary bg-primary/10 text-accent-foreground"
-                  : "border-border bg-secondary/50 text-secondary-foreground opacity-70"
-              }`}
-            >
-              {standard}
-            </button>
-          ))}
+          <div id="compliance-standards" className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {standards.map((standard) => {
+                const isSupported = standard === "AAOIFI";
+                return (
+                  <button
+                    type="button"
+                    key={standard}
+                    disabled={!isSupported}
+                    aria-disabled={!isSupported}
+                    aria-pressed={isSupported}
+                    title={
+                      isSupported
+                        ? "Active — all results are graded against the AAOIFI standard."
+                        : "Disabled — our Zoya data plan currently only provides AAOIFI-based grading. This standard will turn on automatically once Zoya supports it."
+                    }
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors border ${
+                      isSupported
+                        ? "border-primary bg-primary/10 text-accent-foreground cursor-default"
+                        : "border-border bg-secondary/50 text-secondary-foreground opacity-50 cursor-not-allowed"
+                    }`}
+                  >
+                    {standard}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Only AAOIFI grading is available right now. The other standards are shown for
+              reference and will activate automatically once our Zoya plan supports them.
+            </p>
           </div>
         )}
       </div>
