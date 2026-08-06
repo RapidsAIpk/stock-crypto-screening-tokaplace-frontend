@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Clock3 } from "lucide-react";
 import { useUserSettings } from "@/hooks/useUserSettings";
 import { formatClockTime } from "@/lib/dates";
+import { cn } from "@/lib/utils";
 
-export function AppClock() {
+export function AppClock({ className }: { className?: string }) {
   const { settings } = useUserSettings();
   const timeZone = settings.timezone || "UTC";
   const [now, setNow] = useState(() => new Date());
@@ -15,7 +16,7 @@ export function AppClock() {
 
   return (
     <div
-      className="flex items-center gap-2 rounded-full border border-border/60 bg-card/50 px-3 py-1.5"
+      className={cn("flex items-center gap-2 rounded-full border border-border/60 bg-card/50 px-3 py-1.5", className)}
       title={`App timezone: ${timeZone}`}
     >
       <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />

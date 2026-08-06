@@ -33,20 +33,20 @@ export function ScanProgressPanel({ progress }: Props) {
     : null;
 
   return (
-    <div className="flex w-full max-w-2xl flex-col gap-4 rounded-[24px] border border-border/70 bg-card/60 p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10">
+    <div className="flex w-full max-w-2xl flex-col gap-4 rounded-[24px] border border-border/70 bg-card/60 p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10">
             <Activity className="h-4 w-4 text-primary" />
             <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">Scanning markets</p>
-            <p className="text-xs text-muted-foreground">{progress.message}</p>
+            <p className="text-xs text-muted-foreground break-words">{progress.message}</p>
           </div>
         </div>
 
-        <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-mono ${
+        <div className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-mono ${
           progress.connected
             ? "border-primary/20 bg-primary/10 text-primary"
             : "border-border/70 bg-secondary/50 text-muted-foreground"
@@ -92,11 +92,14 @@ export function ScanProgressPanel({ progress }: Props) {
           <ScrollArea className="h-40">
             <div className="space-y-1 p-3 font-mono text-xs">
               {progress.log.map((entry, index) => (
-                <div key={`${entry.timestamp}-${index}`} className="flex items-start gap-2 text-muted-foreground">
+                <div
+                  key={`${entry.timestamp}-${index}`}
+                  className="flex flex-col gap-0.5 text-muted-foreground sm:flex-row sm:items-start sm:gap-2"
+                >
                   <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-primary/80">
                     {formatStage(entry.stage)}
                   </span>
-                  <span className="min-w-0 break-words text-foreground/85">
+                  <span className="min-w-0 flex-1 break-words text-foreground/85">
                     {entry.symbol ? `${entry.symbol} · ` : ""}
                     {entry.message}
                   </span>

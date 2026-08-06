@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Activity, Settings, LogOut, Star } from "lucide-react";
+import { Activity, LayoutDashboard, Settings, LogOut, Star } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppClock } from "@/components/layout/AppClock";
 
@@ -9,50 +9,55 @@ export function AppHeader() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/70 bg-background/70 backdrop-blur-xl">
-      <div className="max-w-full px-4">
-        <div className="flex h-16 items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+      <div className="max-w-full px-2 sm:px-4">
+        <div className="flex h-16 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary sm:h-10 sm:w-10">
             <Activity className="h-5 w-5" />
           </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">Trading Workspace</div>
-            <span className="font-semibold tracking-tight text-foreground">Screener</span>
+          <div className="min-w-0">
+            <div className="hidden text-[11px] uppercase tracking-[0.24em] text-muted-foreground sm:block">Trading Workspace</div>
+            <span className="truncate font-semibold tracking-tight text-foreground">Screener</span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-        <AppClock />
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <AppClock className="hidden sm:flex" />
         <nav className="flex items-center gap-1 rounded-full border border-border/70 bg-card/50 p-1">
           <Link
             to="/"
-            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+            title="Dashboard"
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3 ${
               pathname === "/" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Dashboard
+            <LayoutDashboard className="h-3.5 w-3.5 sm:hidden" />
+            <span className="hidden sm:inline">Dashboard</span>
           </Link>
           <Link
             to="/watchlist"
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+            title="Watchlist"
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3 ${
               pathname === "/watchlist" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             <Star className="h-3.5 w-3.5" />
-            Watchlist
+            <span className="hidden sm:inline">Watchlist</span>
           </Link>
           <Link
             to="/settings"
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+            title="Settings"
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium transition-colors sm:px-3 ${
               pathname === "/settings" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             <Settings className="h-3.5 w-3.5" />
-            Settings
+            <span className="hidden sm:inline">Settings</span>
           </Link>
           {user && (
             <button
               onClick={logout}
-              className="ml-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              title="Log out"
+              className="ml-1 flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:ml-2 sm:px-3"
             >
               <LogOut className="h-3.5 w-3.5" />
             </button>

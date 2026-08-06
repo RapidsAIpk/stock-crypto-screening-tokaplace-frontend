@@ -447,7 +447,7 @@ export function ResultsTable({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center rounded-[24px] border border-border/70 bg-card/60 p-12">
+      <div className="flex items-center justify-center rounded-[24px] border border-border/70 bg-card/60 p-4 sm:p-8 md:p-12">
         {scanProgress ? (
           <ScanProgressPanel progress={scanProgress} />
         ) : (
@@ -745,7 +745,7 @@ export function ResultsTable({
       )}
 
       {filtered.length === 0 ? (
-        <div className="flex min-h-[280px] items-center justify-center rounded-[28px] border border-dashed border-border/70 bg-card/55 p-12">
+        <div className="flex min-h-[280px] items-center justify-center rounded-[28px] border border-dashed border-border/70 bg-card/55 p-4 sm:p-8 md:p-12">
           <div className="space-y-2 text-center">
             <div className="text-sm font-semibold text-foreground">No results yet</div>
             <p className="text-sm text-muted-foreground">Adjust the filters or rerun the scan to surface matching assets.</p>
