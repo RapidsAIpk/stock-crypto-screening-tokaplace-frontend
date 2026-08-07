@@ -875,12 +875,19 @@ export function IndicatorsFilter({
                               const selected = adxConditions(idx).find((condition) => condition.id === conditionDef.id);
                               const isSelected = Boolean(selected);
                               return (
-                                <div key={conditionDef.id} className="space-y-1 rounded border border-border/60 p-2">
+                                <div
+                                  key={conditionDef.id}
+                                  className={`space-y-1 rounded border p-2 transition-colors ${
+                                    isSelected
+                                      ? "border-emerald-500/60 bg-emerald-500/10"
+                                      : "border-border/60"
+                                  }`}
+                                >
                                   <div className="flex items-start gap-2">
                                     <button
                                       onClick={() => toggleAdxCondition(idx, conditionDef.id)}
                                       className={`mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors ${
-                                        isSelected ? "bg-primary border-primary" : "border-border"
+                                        isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"
                                       }`}
                                     />
                                     <span className="text-xs text-foreground">{conditionDef.label}</span>

@@ -303,7 +303,6 @@ describe("indicator defaults", () => {
       down_level: -4,
       falling_level: -10,
       bottom_level: -19,
-      rule: "adx_above",
       window: 1,
       min_history: 200,
     });
@@ -324,7 +323,6 @@ describe("indicator defaults", () => {
       "down_level",
       "falling_level",
       "bottom_level",
-      "rule",
       "window",
       "min_history",
       "mode",
@@ -337,8 +335,6 @@ describe("indicator defaults", () => {
     expect(fields.find((field) => field.key === "down_level")?.label).toBe("Down Level");
     expect(fields.find((field) => field.key === "falling_level")?.label).toBe("Falling Level");
     expect(fields.find((field) => field.key === "bottom_level")?.label).toBe("Bottom Level");
-    expect(fields.find((field) => field.key === "rule")?.label).toBe("Screening Rule");
-    expect(fields.find((field) => field.key === "rule")?.section).toBe("Advanced Screening");
     expect(fields.find((field) => field.key === "min_history")?.section).toBe("Advanced Screening");
     expect(fields.find((field) => field.key === "mode")?.section).toBe("Advanced Screening");
     expect(fields.find((field) => field.key === "conditions")?.section).toBe("Advanced Screening");
@@ -372,7 +368,6 @@ describe("indicator defaults", () => {
         down_level: -4,
         falling_level: -10,
         bottom_level: -19,
-        rule: "adx_above",
         window: 1,
         min_history: 200,
       },
