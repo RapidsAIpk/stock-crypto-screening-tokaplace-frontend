@@ -711,6 +711,7 @@ export interface TrendyAdxConditionDef {
   id: string;
   label: string;
   sub: TrendyAdxConditionSub;
+  category?: string;
 }
 
 export interface TrendyAdxCondition {
@@ -722,55 +723,66 @@ export interface TrendyAdxCondition {
 // Bullish and Bearish share the same condition set — "dominant"/"opposing" DI
 // line is resolved server-side based on the selected mode.
 export const TRENDY_ADX_DIRECTIONAL_CONDITIONS: TrendyAdxConditionDef[] = [
-  { id: "di_crossed_above", label: "DI cross: dominant line just crossed above opposing", sub: "candles_since" },
-  { id: "di_already_above", label: "DI already above (direction is active)", sub: "none" },
-  { id: "di_near_cross", label: "DI close to crossing above (early watch)", sub: "distance" },
-  { id: "di_touched_bounced", label: "DI touched opposing line and bounced", sub: "none" },
-  { id: "di_separating", label: "DI separating upward (pressure getting stronger)", sub: "none" },
-  { id: "di_opposite_falling_away", label: "Opposing DI falling away (weakening)", sub: "none" },
-  { id: "adx_below_20", label: "ADX below threshold (early but weak)", sub: "none" },
-  { id: "adx_near_20", label: "ADX near threshold (strength building)", sub: "distance" },
-  { id: "adx_crossed_above_20", label: "ADX crossed above threshold", sub: "candles_since" },
-  { id: "adx_above_20", label: "ADX above threshold (trend active)", sub: "none" },
-  { id: "adx_above_25", label: "ADX above 25 (strong trend)", sub: "none" },
-  { id: "adx_above_40", label: "ADX above 40 (very strong / possible exhaustion)", sub: "none" },
-  { id: "adx_below_dominant", label: "ADX below dominant DI (strength not fully confirmed)", sub: "none" },
-  { id: "adx_near_dominant", label: "ADX close to dominant DI (almost confirmed)", sub: "distance" },
-  { id: "adx_crossed_above_dominant", label: "ADX crossed above dominant DI (confirmed)", sub: "candles_since" },
-  { id: "adx_above_dominant", label: "ADX above dominant DI (active)", sub: "none" },
-  { id: "adx_below_opposing", label: "ADX below opposing DI (still weak)", sub: "none" },
-  { id: "adx_near_opposing", label: "ADX close to opposing DI", sub: "distance" },
-  { id: "adx_crossed_above_opposing", label: "ADX crossed above opposing DI (opposing pressure weakening)", sub: "candles_since" },
-  { id: "adx_above_opposing", label: "ADX above opposing DI", sub: "none" },
-  { id: "adx_below_both", label: "ADX below both DI lines (very early setup)", sub: "none" },
-  { id: "adx_between_both", label: "ADX between the two DI lines (developing)", sub: "none" },
-  { id: "adx_crossed_above_both", label: "ADX crossed above both DI lines (major confirmation)", sub: "candles_since" },
-  { id: "adx_above_both", label: "ADX above both DI lines (strong confirmation)", sub: "none" },
-  { id: "bg_just_started", label: "Background zone just started", sub: "candles_since" },
-  { id: "bg_active", label: "Background zone is active", sub: "none" },
-  { id: "bg_active_for_x", label: "Background zone active for at least X candles", sub: "candles_since" },
+  // DI Line Comparisons / Crosses
+  { id: "di_crossed_above", label: "DI cross: dominant line just crossed above opposing", sub: "candles_since", category: "DI Line Crossovers & Position" },
+  { id: "di_already_above", label: "DI already above (direction is active)", sub: "none", category: "DI Line Crossovers & Position" },
+  { id: "di_near_cross", label: "DI close to crossing above (early watch)", sub: "distance", category: "DI Line Crossovers & Position" },
+  { id: "di_touched_bounced", label: "DI touched opposing line and bounced", sub: "none", category: "DI Line Crossovers & Position" },
+  { id: "di_separating", label: "DI separating upward (pressure getting stronger)", sub: "none", category: "DI Line Crossovers & Position" },
+  { id: "di_opposite_falling_away", label: "Opposing DI falling away (weakening)", sub: "none", category: "DI Line Crossovers & Position" },
+
+  // ADX Threshold Levels
+  { id: "adx_below_20", label: "ADX below threshold (early but weak)", sub: "none", category: "ADX Threshold Levels" },
+  { id: "adx_near_20", label: "ADX near threshold (strength building)", sub: "distance", category: "ADX Threshold Levels" },
+  { id: "adx_crossed_above_20", label: "ADX crossed above threshold", sub: "candles_since", category: "ADX Threshold Levels" },
+  { id: "adx_above_20", label: "ADX above threshold (trend active)", sub: "none", category: "ADX Threshold Levels" },
+  { id: "adx_above_25", label: "ADX above 25 (strong trend)", sub: "none", category: "ADX Threshold Levels" },
+  { id: "adx_above_40", label: "ADX above 40 (very strong / possible exhaustion)", sub: "none", category: "ADX Threshold Levels" },
+
+  // ADX vs Dominant DI
+  { id: "adx_below_dominant", label: "ADX below dominant DI (strength not fully confirmed)", sub: "none", category: "ADX vs Dominant DI Line" },
+  { id: "adx_near_dominant", label: "ADX close to dominant DI (almost confirmed)", sub: "distance", category: "ADX vs Dominant DI Line" },
+  { id: "adx_crossed_above_dominant", label: "ADX crossed above dominant DI (confirmed)", sub: "candles_since", category: "ADX vs Dominant DI Line" },
+  { id: "adx_above_dominant", label: "ADX above dominant DI (active)", sub: "none", category: "ADX vs Dominant DI Line" },
+
+  // ADX vs Opposing DI
+  { id: "adx_below_opposing", label: "ADX below opposing DI (still weak)", sub: "none", category: "ADX vs Opposing DI Line" },
+  { id: "adx_near_opposing", label: "ADX close to opposing DI", sub: "distance", category: "ADX vs Opposing DI Line" },
+  { id: "adx_crossed_above_opposing", label: "ADX crossed above opposing DI (opposing pressure weakening)", sub: "candles_since", category: "ADX vs Opposing DI Line" },
+  { id: "adx_above_opposing", label: "ADX above opposing DI", sub: "none", category: "ADX vs Opposing DI Line" },
+
+  // ADX vs Both DI Lines
+  { id: "adx_below_both", label: "ADX below both DI lines (very early setup)", sub: "none", category: "ADX vs Both DI Lines" },
+  { id: "adx_between_both", label: "ADX between the two DI lines (developing)", sub: "none", category: "ADX vs Both DI Lines" },
+  { id: "adx_crossed_above_both", label: "ADX crossed above both DI lines (major confirmation)", sub: "candles_since", category: "ADX vs Both DI Lines" },
+  { id: "adx_above_both", label: "ADX above both DI lines (strong confirmation)", sub: "none", category: "ADX vs Both DI Lines" },
+
+  // Background Zones
+  { id: "bg_just_started", label: "Background zone just started", sub: "candles_since", category: "Background Zones" },
+  { id: "bg_active", label: "Background zone is active", sub: "none", category: "Background Zones" },
+  { id: "bg_active_for_x", label: "Background zone active for at least X candles", sub: "candles_since", category: "Background Zones" },
 ];
 
 export const TRENDY_ADX_COMPRESSION_CONDITIONS: TrendyAdxConditionDef[] = [
-  { id: "di_close_together", label: "DI+ and DI- close together", sub: "distance" },
-  { id: "di_touching", label: "DI+ and DI- touching", sub: "none" },
-  { id: "di_pink_toward_blue", label: "DI+ moving toward DI- (possible bearish setup forming)", sub: "none" },
-  { id: "di_blue_toward_pink", label: "DI- moving toward DI+ (possible bullish setup forming)", sub: "none" },
-  { id: "adx_below_20", label: "ADX below threshold", sub: "none" },
-  { id: "adx_turning_up", label: "ADX turning up", sub: "none" },
-  { id: "adx_close_to_20", label: "ADX close to threshold", sub: "distance" },
-  { id: "bg_changed_recently", label: "Background changed recently", sub: "candles_since" },
+  { id: "di_close_together", label: "DI+ and DI- close together", sub: "distance", category: "DI Convergence" },
+  { id: "di_touching", label: "DI+ and DI- touching", sub: "none", category: "DI Convergence" },
+  { id: "di_pink_toward_blue", label: "DI+ moving toward DI- (possible bearish setup forming)", sub: "none", category: "DI Convergence" },
+  { id: "di_blue_toward_pink", label: "DI- moving toward DI+ (possible bullish setup forming)", sub: "none", category: "DI Convergence" },
+  { id: "adx_below_20", label: "ADX below threshold", sub: "none", category: "ADX Strength" },
+  { id: "adx_turning_up", label: "ADX turning up", sub: "none", category: "ADX Strength" },
+  { id: "adx_close_to_20", label: "ADX close to threshold", sub: "distance", category: "ADX Strength" },
+  { id: "bg_changed_recently", label: "Background changed recently", sub: "candles_since", category: "Background State" },
 ];
 
 export const TRENDY_ADX_WEAK_CONDITIONS: TrendyAdxConditionDef[] = [
-  { id: "adx_below_20", label: "ADX below threshold", sub: "none" },
-  { id: "adx_below_both_di", label: "ADX below both DI lines", sub: "none" },
-  { id: "adx_falling", label: "ADX falling", sub: "none" },
-  { id: "adx_flat", label: "ADX flat", sub: "none" },
-  { id: "di_close_no_separation", label: "DI+ and DI- close with no separation", sub: "distance" },
-  { id: "bg_mixed_or_changing", label: "Background mixed or changing too often", sub: "none" },
-  { id: "no_clean_di_cross", label: "No clean DI cross recently", sub: "none" },
-  { id: "no_adx_confirmation", label: "No ADX confirmation recently", sub: "none" },
+  { id: "adx_below_20", label: "ADX below threshold", sub: "none", category: "ADX Weakness" },
+  { id: "adx_below_both_di", label: "ADX below both DI lines", sub: "none", category: "ADX Weakness" },
+  { id: "adx_falling", label: "ADX falling", sub: "none", category: "ADX Weakness" },
+  { id: "adx_flat", label: "ADX flat", sub: "none", category: "ADX Weakness" },
+  { id: "di_close_no_separation", label: "DI+ and DI- close with no separation", sub: "distance", category: "DI Separation" },
+  { id: "bg_mixed_or_changing", label: "Background mixed or changing too often", sub: "none", category: "Background State" },
+  { id: "no_clean_di_cross", label: "No clean DI cross recently", sub: "none", category: "Signals & Confirmation" },
+  { id: "no_adx_confirmation", label: "No ADX confirmation recently", sub: "none", category: "Signals & Confirmation" },
 ];
 
 export function trendyAdxConditionsForMode(mode: string): TrendyAdxConditionDef[] {
@@ -954,6 +966,12 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "length", label: "Length", type: "number", min: 1 },
       { key: "threshold", label: "Threshold", type: "number", step: 0.1 },
       { key: "show_background_colors", label: "Show Background Colors?", type: "boolean" },
+      {
+        key: "background_color",
+        label: "Background Color Choice",
+        type: "select",
+        options: ["green", "red"],
+      },
       { key: "use_dark_theme", label: "Use Dark Theme for Black Backgrounds?", type: "boolean" },
       { key: "top_level", label: "Top Level", type: "number" },
       { key: "rising_level", label: "Rising Level", type: "number" },
@@ -1416,6 +1434,7 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     length: 11,
     threshold: 20,
     show_background_colors: false,
+    background_color: "green",
     use_dark_theme: false,
     top_level: 19,
     rising_level: 10,

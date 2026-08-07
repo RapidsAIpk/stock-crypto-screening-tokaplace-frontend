@@ -867,55 +867,73 @@ export function IndicatorsFilter({
                           </div>
                         )}
                         {field.type === "condition-list" && (
-                          <div className="col-span-2 space-y-2 rounded-md border border-border/70 p-2">
+                          <div className="col-span-2 space-y-3 rounded-md border border-border/70 p-2">
                             {trendyAdxConditionsForMode(String(ind.config.mode ?? "")).length === 0 && (
                               <p className="text-[10px] text-muted-foreground">Choose a Filter Type above to see its conditions.</p>
                             )}
-                            {trendyAdxConditionsForMode(String(ind.config.mode ?? "")).map((conditionDef) => {
-                              const selected = adxConditions(idx).find((condition) => condition.id === conditionDef.id);
-                              const isSelected = Boolean(selected);
-                              return (
-                                <div
-                                  key={conditionDef.id}
-                                  className={`space-y-1 rounded border p-2 transition-colors ${
-                                    isSelected
-                                      ? "border-emerald-500/60 bg-emerald-500/10"
-                                      : "border-border/60"
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-2">
-                                    <button
-                                      onClick={() => toggleAdxCondition(idx, conditionDef.id)}
-                                      className={`mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors ${
-                                        isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"
-                                      }`}
-                                    />
-                                    <span className="text-xs text-foreground">{conditionDef.label}</span>
+                            {(() => {
+                              const allConds = trendyAdxConditionsForMode(String(ind.config.mode ?? ""));
+                              // Group by category
+                              const categories: Record<string, typeof allConds> = {};
+                              allConds.forEach((c) => {
+                                const cat = c.category || "General Conditions";
+                                if (!categories[cat]) categories[cat] = [];
+                                categories[cat].push(c);
+                              });
+
+                              return Object.entries(categories).map(([catName, condList]) => (
+                                <div key={catName} className="space-y-1.5 border-t border-border/40 pt-2 first:border-t-0 first:pt-0">
+                                  <h5 className="text-[11px] font-semibold text-primary/90 tracking-wide uppercase">{catName}</h5>
+                                  <div className="space-y-1">
+                                    {condList.map((conditionDef) => {
+                                      const selected = adxConditions(idx).find((condition) => condition.id === conditionDef.id);
+                                      const isSelected = Boolean(selected);
+                                      return (
+                                        <div
+                                          key={conditionDef.id}
+                                          className={`space-y-1 rounded border p-2 transition-colors ${
+                                            isSelected
+                                              ? "border-emerald-500/60 bg-emerald-500/10"
+                                              : "border-border/60 hover:bg-secondary/40"
+                                          }`}
+                                        >
+                                          <div className="flex items-start gap-2">
+                                            <button
+                                              onClick={() => toggleAdxCondition(idx, conditionDef.id)}
+                                              className={`mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors ${
+                                                isSelected ? "bg-emerald-500 border-emerald-500" : "border-border"
+                                              }`}
+                                            />
+                                            <span className="text-xs text-foreground">{conditionDef.label}</span>
+                                          </div>
+                                          {isSelected && conditionDef.sub === "candles_since" && (
+                                            <div className="pl-6">
+                                              <PresetOrCustomField
+                                                label="Candles Since Event"
+                                                value={(selected?.candles_since as number) ?? 0}
+                                                presets={[0, 1, 2, 3, 5, 10]}
+                                                suffix=" candles ago"
+                                                onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { candles_since: v })}
+                                              />
+                                            </div>
+                                          )}
+                                          {isSelected && conditionDef.sub === "distance" && (
+                                            <div className="pl-6">
+                                              <PresetOrCustomField
+                                                label="Distance / Closeness (indicator points)"
+                                                value={(selected?.distance as number) ?? 1}
+                                                presets={[0.5, 1, 2, 3, 5]}
+                                                onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { distance: v })}
+                                              />
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
-                                  {isSelected && conditionDef.sub === "candles_since" && (
-                                    <div className="pl-6">
-                                      <PresetOrCustomField
-                                        label="Candles Since Event"
-                                        value={(selected?.candles_since as number) ?? 0}
-                                        presets={[0, 1, 2, 3, 5, 10]}
-                                        suffix=" candles ago"
-                                        onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { candles_since: v })}
-                                      />
-                                    </div>
-                                  )}
-                                  {isSelected && conditionDef.sub === "distance" && (
-                                    <div className="pl-6">
-                                      <PresetOrCustomField
-                                        label="Distance / Closeness (indicator points)"
-                                        value={(selected?.distance as number) ?? 1}
-                                        presets={[0.5, 1, 2, 3, 5]}
-                                        onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { distance: v })}
-                                      />
-                                    </div>
-                                  )}
                                 </div>
-                              );
-                            })}
+                              ));
+                            })()}
                           </div>
                         )}
                       </div>

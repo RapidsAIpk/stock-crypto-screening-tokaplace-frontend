@@ -4,6 +4,17 @@ import { describe, expect, it, vi } from "vitest";
 import { ResultsTable } from "./ResultsTable";
 import type { ScreenerResult } from "@/types/screener";
 
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({
+    user: null,
+    loading: false,
+    signIn: vi.fn(),
+    signUp: vi.fn(),
+    logout: vi.fn(),
+    resetPassword: vi.fn(),
+  }),
+}));
+
 function buildResult(index: number): ScreenerResult {
   return {
     symbol: `SYM${index}`,

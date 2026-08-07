@@ -31,6 +31,7 @@ interface Props {
   loading: boolean;
   scanProgress?: ScanProgressState | null;
   activeSignalNames?: string[];
+  indicatorConfigs?: IndicatorConfig[];
   onRequestDetail: (result: ScreenerResult) => Promise<ScreenerResultDetail>;
   onExportAllDetails?: (
     onProgress?: (loaded: number, total: number) => void,
@@ -123,6 +124,7 @@ export function ResultsTable({
   loading,
   scanProgress = null,
   activeSignalNames = EMPTY_SIGNAL_NAMES,
+  indicatorConfigs,
   onRequestDetail,
   onExportAllDetails,
   watchlist: watchlistEntries = EMPTY_WATCHLIST,
@@ -879,7 +881,7 @@ export function ResultsTable({
                       <td className="px-4 py-3">
                         <div className={`flex gap-1.5 flex-wrap ${viewMode === "compact" ? "max-w-[320px]" : ""}`}>
                           {(viewMode === "compact" ? visibleStickers.slice(0, 3) : visibleStickers).map((s, i) => {
-                            const color = getIndicatorColor(s);
+                            const color = getIndicatorColor(s, indicatorConfigs);
                             return (
                               <span
                                 key={`${row.symbol}-${s}-${i}`}

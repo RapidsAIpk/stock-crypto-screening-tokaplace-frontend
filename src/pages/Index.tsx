@@ -89,6 +89,7 @@ const Index = () => {
                 scanProgress={state.scanProgress}
                 onRequestDetail={state.fetchResultDetail}
                 onExportAllDetails={appEnv.showTechnicalDetails ? state.exportAllResultsDetails : undefined}
+                indicatorConfigs={state.indicators}
                 activeSignalNames={[
                   ...state.indicators.map((indicator) => indicator.name),
                   ...(state.channelRespect ? ["channel_respect"] : []),
