@@ -77,6 +77,10 @@ const TV_TEXT = "#b2b5be";
 const TV_BORDER = "#2a2e39";
 const UP_COLOR = "#089981";
 const DOWN_COLOR = "#f23645";
+const ADX_PLUS_COLOR = "#ff00ff";
+const ADX_MINUS_COLOR = "#004cff";
+const ADX_STRENGTH_COLOR = "#facc15";
+const ADX_THRESHOLD_COLOR = "#d8d800";
 
 function confluenceValueAt(
   source: ConfluenceChartSource,
