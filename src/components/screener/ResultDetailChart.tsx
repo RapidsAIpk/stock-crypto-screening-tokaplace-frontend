@@ -5,10 +5,13 @@ import {
   ColorType,
   createChart,
   CrosshairMode,
+  HistogramSeries,
   LineSeries,
   LineStyle,
   type CandlestickData,
+  type IChartApi,
   type LineData,
+  type LogicalRange,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
@@ -251,115 +254,13 @@ function toCandleData(
   });
 }
 
-function TrendyAdxPane({
-  points,
-  threshold,
-  topLevel,
-}: {
-  points: TrendyAdxPoint[];
-  threshold: number;
-  topLevel: number;
-}) {
-  const height = 170;
-  const width = Math.max(2, points.length - 1);
-  const values = points.flatMap((point) => [point.plusDi, point.minusDi, point.adx])
-    .filter((value): value is number => value !== null && Number.isFinite(value));
-  const maxValue = Math.max(50, threshold, topLevel, ...values);
-  const yForValue = (value: number) => height - 18 - ((value / maxValue) * (height - 32));
-  const xForIndex = (index: number) => points.length <= 1 ? 0 : (index / (points.length - 1)) * width;
-  const pathFor = (key: keyof Pick<TrendyAdxPoint, "plusDi" | "minusDi" | "adx">) => {
-    let started = false;
-    return points.reduce((path, point, index) => {
-      const value = point[key];
-      if (value === null) {
-        started = false;
-        return path;
-      }
-      const command = started ? "L" : "M";
-      started = true;
-      return `${path} ${command}${xForIndex(index).toFixed(3)},${yForValue(value).toFixed(3)}`;
-    }, "").trim();
-  };
-  const latest = [...points].reverse().find((point) => (
-    point.plusDi !== null || point.minusDi !== null || point.adx !== null
+function adxLineData(
+  points: TrendyAdxPoint[],
+  key: keyof Pick<TrendyAdxPoint, "plusDi" | "minusDi" | "adx">,
+): LineData<UTCTimestamp>[] {
+  return points.flatMap((point) => (
+    point[key] === null ? [] : [{ time: point.time as UTCTimestamp, value: point[key] }]
   ));
-  const thresholdY = yForValue(threshold);
-
-  return (
-    <div className="border-t border-[#2a2e39] bg-[#0b0e11]">
-      <div className="relative h-[170px] overflow-hidden">
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          preserveAspectRatio="none"
-          className="absolute inset-0 h-full w-full"
-          aria-label="Trendy ADX DI plus DI minus trend pane"
-        >
-          {points.map((point, index) => {
-            const plus = point.plusDi ?? 0;
-            const minus = point.minusDi ?? 0;
-            const adx = point.adx ?? 0;
-            const strongTrend = adx >= threshold;
-            const color = plus >= minus ? "#008000" : "#b00000";
-            const opacity = strongTrend ? 0.72 : 0.42;
-            return (
-              <rect
-                key={point.time}
-                x={xForIndex(index)}
-                y={0}
-                width={Math.max(1, width / Math.max(1, points.length - 1))}
-                height={height}
-                fill={color}
-                opacity={opacity}
-              />
-            );
-          })}
-          {[0.25, 0.5, 0.75].map((ratio) => (
-            <line
-              key={ratio}
-              x1={0}
-              x2={width}
-              y1={height * ratio}
-              y2={height * ratio}
-              stroke="#24282f"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
-          <line
-            x1={0}
-            x2={width}
-            y1={thresholdY}
-            y2={thresholdY}
-            stroke={ADX_THRESHOLD_COLOR}
-            strokeDasharray="5 5"
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-          />
-          <path d={pathFor("plusDi")} fill="none" stroke={ADX_PLUS_COLOR} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
-          <path d={pathFor("minusDi")} fill="none" stroke={ADX_MINUS_COLOR} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
-          <path d={pathFor("adx")} fill="none" stroke={ADX_STRENGTH_COLOR} strokeWidth={3} vectorEffect="non-scaling-stroke" />
-        </svg>
-        <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
-          <span>Trendy ADX</span>
-          {latest?.adx != null ? <span style={{ color: ADX_STRENGTH_COLOR }}>{latest.adx.toFixed(3)}</span> : null}
-          {latest?.minusDi != null ? <span style={{ color: ADX_MINUS_COLOR }}>{latest.minusDi.toFixed(3)}</span> : null}
-          {latest?.plusDi != null ? <span style={{ color: ADX_PLUS_COLOR }}>{latest.plusDi.toFixed(3)}</span> : null}
-        </div>
-        <div className="absolute right-2 top-4 space-y-2 font-mono text-xs font-bold">
-          {latest?.adx != null ? (
-            <div className="bg-[#111317] px-2 py-1" style={{ color: ADX_STRENGTH_COLOR }}>{latest.adx.toFixed(3)}</div>
-          ) : null}
-          {latest?.minusDi != null ? (
-            <div className="px-2 py-1 text-white" style={{ backgroundColor: ADX_MINUS_COLOR }}>{latest.minusDi.toFixed(3)}</div>
-          ) : null}
-          {latest?.plusDi != null ? (
-            <div className="px-2 py-1 text-white" style={{ backgroundColor: ADX_PLUS_COLOR }}>{latest.plusDi.toFixed(3)}</div>
-          ) : null}
-          <div className="bg-[#787b86] px-2 py-1 text-white">{threshold.toFixed(3)}</div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function ResultDetailChart({
@@ -376,6 +277,7 @@ export function ResultDetailChart({
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const chartHostRef = useRef<HTMLDivElement>(null);
+  const adxChartHostRef = useRef<HTMLDivElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
   const candles = useMemo(() => normalizeMarketCandles(rawCandles), [rawCandles]);
   const completedCandles = useMemo(
@@ -482,16 +384,24 @@ export function ResultDetailChart({
     ? confluenceCandleReasons
     : channelRespectCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
-  const visibleAdxPoints = useMemo(() => {
-    if (range === "all") return adxPoints;
-    return adxPoints.slice(-range);
-  }, [adxPoints, range]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
     const index = source.findIndex((candle) => candle.time === hoveredTime);
     return index >= 0 ? index : Math.max(0, source.length - 1);
   }, [hoveredTime, source]);
   const selected = source[selectedIndex];
+  const selectedAdx = useMemo(() => {
+    if (hoveredTime === null) {
+      return [...adxPoints].reverse().find((point) => (
+        point.plusDi !== null || point.minusDi !== null || point.adx !== null
+      ));
+    }
+    return adxPoints.find((point) => point.time === hoveredTime);
+  }, [adxPoints, hoveredTime]);
+  const showAdxPane = Boolean(
+    adxIndicator
+    && adxPoints.some((point) => point.plusDi !== null || point.minusDi !== null || point.adx !== null),
+  );
   const selectedRegression = mode === "regression" && regressionChannel && selected
     ? {
         upper: regressionValueAt(regressionChannel, "upper", selectedIndex, source.length),
@@ -556,7 +466,7 @@ export function ResultDetailChart({
       },
       leftPriceScale: { visible: false },
       timeScale: {
-        visible: true,
+        visible: !showAdxPane,
         borderColor: TV_BORDER,
         timeVisible: true,
         secondsVisible: false,
@@ -608,6 +518,138 @@ export function ResultDetailChart({
       },
       kineticScroll: { mouse: true, touch: true },
     });
+
+    const adxHost = adxChartHostRef.current;
+    const adxChart = showAdxPane && adxHost
+      ? createChart(adxHost, {
+          width: Math.max(320, adxHost.clientWidth),
+          height: 170,
+          layout: {
+            background: { type: ColorType.Solid, color: TV_BACKGROUND },
+            textColor: TV_TEXT,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+            fontSize: 12,
+            attributionLogo: false,
+          },
+          grid: {
+            vertLines: { color: TV_GRID, style: LineStyle.Dotted },
+            horzLines: { color: TV_GRID, style: LineStyle.Dotted },
+          },
+          rightPriceScale: {
+            visible: true,
+            borderColor: TV_BORDER,
+            entireTextOnly: true,
+            scaleMargins: { top: 0.08, bottom: 0.08 },
+          },
+          leftPriceScale: { visible: false },
+          timeScale: {
+            visible: true,
+            borderColor: TV_BORDER,
+            timeVisible: true,
+            secondsVisible: false,
+            rightOffset: 6,
+            barSpacing: 9,
+            minBarSpacing: 2,
+            fixLeftEdge: false,
+            fixRightEdge: false,
+            lockVisibleTimeRangeOnResize: false,
+            tickMarkFormatter: (time) => new Intl.DateTimeFormat(undefined, {
+              timeZone,
+              ...(timeframe.includes("day")
+                ? { month: "short", day: "numeric" }
+                : { hour: "2-digit", minute: "2-digit", hour12: false }),
+            }).format(new Date(unixTime(time) * 1000)),
+          },
+          crosshair: {
+            mode: CrosshairMode.Normal,
+            vertLine: {
+              color: "#758696",
+              width: 1,
+              style: LineStyle.Dashed,
+              labelBackgroundColor: "#363a45",
+              labelVisible: true,
+            },
+            horzLine: {
+              color: "#758696",
+              width: 1,
+              style: LineStyle.Dashed,
+              labelBackgroundColor: "#363a45",
+              labelVisible: true,
+            },
+          },
+          localization: {
+            priceFormatter: (price) => price.toFixed(3),
+            timeFormatter: (time) => formatTime(unixTime(time), timeZone),
+          },
+          handleScale: {
+            mouseWheel: true,
+            pinch: true,
+            axisPressedMouseMove: { time: true, price: true },
+            axisDoubleClickReset: { time: true, price: true },
+          },
+          handleScroll: {
+            mouseWheel: true,
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: true,
+          },
+          kineticScroll: { mouse: true, touch: true },
+        })
+      : null;
+
+    if (adxChart) {
+      const adxValues = adxPoints.flatMap((point) => [point.plusDi, point.minusDi, point.adx])
+        .filter((value): value is number => value !== null && Number.isFinite(value));
+      const adxMax = Math.max(50, adxThreshold, adxTopLevel, ...adxValues);
+      const backgroundSeries = adxChart.addSeries(HistogramSeries, {
+        color: "rgba(0, 128, 0, 0.45)",
+        base: 0,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+      });
+      backgroundSeries.setData(adxPoints.map((point) => {
+        const plus = point.plusDi ?? 0;
+        const minus = point.minusDi ?? 0;
+        const adx = point.adx ?? 0;
+        const bullish = plus >= minus;
+        const strong = adx >= adxThreshold;
+        return {
+          time: point.time as UTCTimestamp,
+          value: adxMax,
+          color: bullish
+            ? (strong ? "rgba(0, 128, 0, 0.70)" : "rgba(0, 128, 0, 0.38)")
+            : (strong ? "rgba(176, 0, 0, 0.70)" : "rgba(176, 0, 0, 0.38)"),
+        };
+      }));
+
+      const addAdxLine = (
+        color: string,
+        width: 1 | 2,
+        style: LineStyle,
+        data: LineData<UTCTimestamp>[],
+        lastValueVisible = false,
+      ) => {
+        const series = adxChart.addSeries(LineSeries, {
+          color,
+          lineWidth: width,
+          lineStyle: style,
+          crosshairMarkerVisible: false,
+          priceLineVisible: false,
+          lastValueVisible,
+          priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+        });
+        series.setData(data);
+      };
+
+      addAdxLine(ADX_THRESHOLD_COLOR, 1, LineStyle.Dashed, adxPoints.map((point) => ({
+        time: point.time as UTCTimestamp,
+        value: adxThreshold,
+      })));
+      addAdxLine(ADX_PLUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "plusDi"), true);
+      addAdxLine(ADX_MINUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "minusDi"), true);
+      addAdxLine(ADX_STRENGTH_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "adx"), true);
+    }
 
     if (mode === "trend" && trendChannel) {
       addTrendChannelFills(chart, source, trendChannel, precision);
@@ -718,18 +760,46 @@ export function ResultDetailChart({
     const applyRange = () => {
       if (range === "all" || source.length <= range) {
         chart.timeScale().fitContent();
+        adxChart?.timeScale().fitContent();
         return;
       }
-      chart.timeScale().setVisibleLogicalRange({
+      const logicalRange = {
         from: source.length - range - 0.5,
         to: source.length - 0.5 + 6,
-      });
+      };
+      chart.timeScale().setVisibleLogicalRange(logicalRange);
+      adxChart?.timeScale().setVisibleLogicalRange(logicalRange);
     };
     applyRange();
     resetViewRef.current = () => {
       candleSeries.priceScale().applyOptions({ autoScale: true });
+      adxChart?.priceScale("right").applyOptions({ autoScale: true });
       applyRange();
     };
+
+    let syncingTimeScale = false;
+    const syncVisibleTimeRange = (target: IChartApi) => (timeRange: { from: Time; to: Time } | null) => {
+      if (syncingTimeScale || !timeRange) return;
+      syncingTimeScale = true;
+      target.timeScale().setVisibleRange(timeRange);
+      syncingTimeScale = false;
+    };
+    const syncVisibleLogicalRange = (target: IChartApi) => (logicalRange: LogicalRange | null) => {
+      if (syncingTimeScale || !logicalRange) return;
+      syncingTimeScale = true;
+      target.timeScale().setVisibleLogicalRange(logicalRange);
+      syncingTimeScale = false;
+    };
+    const syncMainTimeToAdx = adxChart ? syncVisibleTimeRange(adxChart) : null;
+    const syncAdxTimeToMain = syncVisibleTimeRange(chart);
+    const syncMainLogicalToAdx = adxChart ? syncVisibleLogicalRange(adxChart) : null;
+    const syncAdxLogicalToMain = syncVisibleLogicalRange(chart);
+    if (adxChart && syncMainTimeToAdx && syncMainLogicalToAdx) {
+      chart.timeScale().subscribeVisibleTimeRangeChange(syncMainTimeToAdx);
+      adxChart.timeScale().subscribeVisibleTimeRangeChange(syncAdxTimeToMain);
+      chart.timeScale().subscribeVisibleLogicalRangeChange(syncMainLogicalToAdx);
+      adxChart.timeScale().subscribeVisibleLogicalRangeChange(syncAdxLogicalToMain);
+    }
 
     chart.subscribeCrosshairMove((parameter) => {
       const time = parameter.time === undefined ? null : unixTime(parameter.time);
@@ -742,20 +812,34 @@ export function ResultDetailChart({
         setCandleTooltip(null);
       }
     });
+    adxChart?.subscribeCrosshairMove((parameter) => {
+      setHoveredTime(parameter.time === undefined ? null : unixTime(parameter.time));
+    });
 
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width;
-      if (width) chart.applyOptions({ width: Math.floor(width) });
+      if (width) {
+        const nextWidth = Math.floor(width);
+        chart.applyOptions({ width: nextWidth });
+        adxChart?.applyOptions({ width: nextWidth });
+      }
     });
     observer.observe(host);
 
     return () => {
+      if (adxChart && syncMainTimeToAdx && syncMainLogicalToAdx) {
+        chart.timeScale().unsubscribeVisibleTimeRangeChange(syncMainTimeToAdx);
+        adxChart.timeScale().unsubscribeVisibleTimeRangeChange(syncAdxTimeToMain);
+        chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMainLogicalToAdx);
+        adxChart.timeScale().unsubscribeVisibleLogicalRangeChange(syncAdxLogicalToMain);
+      }
       observer.disconnect();
       resetViewRef.current = () => undefined;
+      adxChart?.remove();
       chart.remove();
       setCandleTooltip(null);
     };
-  }, [candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
+  }, [adxPoints, adxThreshold, adxTopLevel, candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, showAdxPane, source, timeZone, timeframe, trendChannel]);
 
   if (!completedCandles.length) {
     return (
@@ -973,12 +1057,20 @@ export function ResultDetailChart({
         ) : null}
       </div>
 
-      {adxIndicator && visibleAdxPoints.some((point) => point.plusDi !== null || point.minusDi !== null || point.adx !== null) ? (
-        <TrendyAdxPane
-          points={visibleAdxPoints}
-          threshold={adxThreshold}
-          topLevel={adxTopLevel}
-        />
+      {showAdxPane ? (
+        <div className="relative border-t border-[#2a2e39] bg-[#0b0e11]">
+          <div
+            ref={adxChartHostRef}
+            data-testid="trendy-adx-chart-canvas"
+            className="h-[170px] w-full bg-[#0b0e11]"
+          />
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
+            <span>Trendy ADX</span>
+            {selectedAdx?.adx != null ? <span style={{ color: ADX_STRENGTH_COLOR }}>{selectedAdx.adx.toFixed(3)}</span> : null}
+            {selectedAdx?.minusDi != null ? <span style={{ color: ADX_MINUS_COLOR }}>{selectedAdx.minusDi.toFixed(3)}</span> : null}
+            {selectedAdx?.plusDi != null ? <span style={{ color: ADX_PLUS_COLOR }}>{selectedAdx.plusDi.toFixed(3)}</span> : null}
+          </div>
+        </div>
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
