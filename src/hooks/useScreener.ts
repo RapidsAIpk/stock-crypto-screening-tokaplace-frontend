@@ -60,18 +60,29 @@ function runtimeApiBase(): string {
   return base.replace(/\/+$/, "");
 }
 
-function runtimeTimeoutMs(): number {
-  const parsed = Number(localStorage.getItem("screener.apiTimeoutMs") || "");
+function runtimeTimeoutMs(accountOverrideMs?: number): number {
+  // Prefer the signed-in account's saved timeout (synced from the backend,
+  // so it follows the user across devices/browsers) over the localStorage
+  // copy, which is only a same-browser cache written as a side effect of
+  // hitting Save on Settings.
+  const parsed = accountOverrideMs ?? Number(localStorage.getItem("screener.apiTimeoutMs") || "");
   const fallback = 48000;
   if (!Number.isFinite(parsed) || parsed < 1000) {
     return fallback;
   }
-  return Math.min(300000, Math.max(1000, parsed));
+  // Must match the max enforced by the Request Timeout field in
+  // SettingsPage.tsx - if the two caps drift, a value the UI happily
+  // accepts here gets silently clamped back down, and a scan fails with a
+  // timeout message quoting a lower number than what Settings shows.
+  return Math.min(600000, Math.max(1000, parsed));
 }
 
-function runtimeRetries(): number {
-  const parsed = Number(localStorage.getItem("screener.apiRetries") || "");
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+function runtimeRetries(accountOverrideRetries?: number): number {
+  const parsed = accountOverrideRetries ?? Number(localStorage.getItem("screener.apiRetries") || "");
+  // A transient backend blip (brief restart, dropped connection) should not
+  // kill an in-progress scan outright, so we retry a couple of times by
+  // default instead of giving up on the very first network hiccup.
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 2;
 }
 
 function isAbortError(error: unknown) {
@@ -85,6 +96,34 @@ function isAbortError(error: unknown) {
 
   const message = error.message.toLowerCase();
   return message.includes("aborterror") || message.includes("aborted");
+}
+
+// The connection dropping mid-request (backend restart, brief network loss)
+// surfaces as a TypeError from fetch itself, not an HTTP error response.
+// This is what we want to retry - a 4xx/5xx with a real response body is an
+// application-level failure and retrying it would just waste time.
+function isNetworkError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("fetch")
+    || message.includes("network")
+    || message.includes("connection")
+    || message.includes("load failed")
+  );
+}
+
+class HttpStatusError extends Error {}
+
+function retryDelayMs(attempt: number): number {
+  return Math.min(4000, 500 * (attempt + 1));
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function timeframeToSeconds(value: string): number | null {
@@ -175,11 +214,17 @@ function migrateIndicatorTimeframesForMode(
   );
 }
 
-export function useScreener() {
+export interface ScreenerAccountRuntimeConfig {
+  apiTimeoutMs?: number;
+  apiRetries?: number;
+}
+
+export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig) {
   const {
     progress: scanProgress,
     beginScan,
     endScan,
+    activeScanId,
   } = useScanProgress();
 
   // -------------------------------------------------------
@@ -279,6 +324,10 @@ export function useScreener() {
   // async, but a ref update is immediate, so this is checked synchronously
   // at the top of every run* function.
   const isBusyRef = useRef(false);
+
+  // Tracks the AbortController for the in-flight scan request so cancelScan
+  // can abort it from outside callAPI.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Bumped by resetGateEntry (called by every filter setter). A run*
   // function captures this value before its request goes out; if it no
@@ -594,14 +643,15 @@ export function useScreener() {
     options?: { scanId?: string },
   ): Promise<T> => {
     const base = runtimeApiBase();
-    const timeoutMs = runtimeTimeoutMs();
-    const retries = runtimeRetries();
+    const timeoutMs = runtimeTimeoutMs(accountRuntimeConfig?.apiTimeoutMs);
+    const retries = runtimeRetries(accountRuntimeConfig?.apiRetries);
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       let timer: ReturnType<typeof setTimeout> | null = null;
       try {
         const controller = new AbortController();
+        abortControllerRef.current = controller;
         timer = setTimeout(() => controller.abort(), timeoutMs);
 
         const headers: Record<string, string> = {
@@ -634,20 +684,28 @@ export function useScreener() {
             // Ignore JSON parse failures and fall back to the default message.
           }
 
-          throw new Error(message);
+          throw new HttpStatusError(message);
         }
 
         return res.json() as Promise<T>;
       } catch (error) {
+        let retryable = false;
+
         if (isAbortError(error)) {
           const timeoutSeconds = Math.max(1, Math.round(timeoutMs / 1000));
           lastError = new Error(
             `Request timed out after ${timeoutSeconds}s. Increase timeout in Settings > API Control.`
           );
+          retryable = true;
+        } else if (isNetworkError(error)) {
+          lastError = error instanceof Error ? error : new Error("Request failed");
+          retryable = true;
         } else {
           lastError = error instanceof Error ? error : new Error("Request failed");
+          retryable = false;
         }
-        if (attempt >= retries) {
+
+        if (!retryable || attempt >= retries) {
           break;
         }
       } finally {
@@ -655,11 +713,34 @@ export function useScreener() {
           clearTimeout(timer);
         }
       }
+
+      setStatusMessage(`Connection dropped, reconnecting… (attempt ${attempt + 2} of ${retries + 1})`);
+      await delay(retryDelayMs(attempt));
     }
 
     throw lastError ?? new Error("Request failed");
 
   };
+
+  const cancelScan = useCallback(async () => {
+    const scanId = activeScanId.current;
+    if (scanId) {
+      try {
+        await fetch(`${runtimeApiBase()}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scan_id: scanId }),
+        });
+      } catch {
+        // Best-effort; aborting the in-flight request below still stops the UI.
+      }
+    }
+    abortControllerRef.current?.abort();
+    endScan();
+    setLoading(false);
+    setStatusMessage("Scan cancelled.");
+    isBusyRef.current = false;
+  }, [activeScanId, endScan]);
 
   const validateGateEntryTimeframes = useCallback(() => {
     const gateSeconds = timeframeToSeconds(gateTimeframe);
@@ -1196,6 +1277,7 @@ export function useScreener() {
     runGate,
     runEntry,
     runGateEntry,
+    cancelScan,
     fetchResultDetail,
     exportAllResultsDetails,
 

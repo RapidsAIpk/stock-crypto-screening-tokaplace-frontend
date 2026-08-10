@@ -756,8 +756,13 @@ export function IndicatorsFilter({
                                     <div className="text-[10px] text-muted-foreground">Window</div>
                                     <input
                                       type="number"
-                                      value={(area.window as number) ?? 1}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "window", e.target.value ? Number(e.target.value) : 1)}
+                                      value={(area.window as number | null) ?? ""}
+                                      onChange={(e) => updateAreaRule(idx, areaIdx, "window", e.target.value === "" ? null : Number(e.target.value))}
+                                      onBlur={(e) => {
+                                        if (!e.target.value) {
+                                          updateAreaRule(idx, areaIdx, "window", 1);
+                                        }
+                                      }}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                     />
                                   </div>
@@ -766,8 +771,13 @@ export function IndicatorsFilter({
                                     <input
                                       type="number"
                                       step="0.01"
-                                      value={(area.tolerance as number) ?? 0}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "tolerance", e.target.value ? Number(e.target.value) : 0)}
+                                      value={(area.tolerance as number | null) ?? ""}
+                                      onChange={(e) => updateAreaRule(idx, areaIdx, "tolerance", e.target.value === "" ? null : Number(e.target.value))}
+                                      onBlur={(e) => {
+                                        if (!e.target.value) {
+                                          updateAreaRule(idx, areaIdx, "tolerance", 0);
+                                        }
+                                      }}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
                                     />
                                   </div>
@@ -809,8 +819,13 @@ export function IndicatorsFilter({
                                     <div className="text-[10px] text-muted-foreground">Confirmation Window</div>
                                     <input
                                       type="number"
-                                      value={(area.confirmation_window as number) ?? 1}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "confirmation_window", e.target.value ? Number(e.target.value) : 1)}
+                                      value={(area.confirmation_window as number | null) ?? ""}
+                                      onChange={(e) => updateAreaRule(idx, areaIdx, "confirmation_window", e.target.value === "" ? null : Number(e.target.value))}
+                                      onBlur={(e) => {
+                                        if (!e.target.value) {
+                                          updateAreaRule(idx, areaIdx, "confirmation_window", 1);
+                                        }
+                                      }}
                                       disabled={!confirmationWindowActive}
                                       title={confirmationWindowActive ? undefined : "Ignored until confirmation is enabled and a confirmation type or pattern is selected."}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"

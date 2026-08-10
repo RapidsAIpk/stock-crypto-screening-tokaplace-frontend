@@ -3,7 +3,7 @@ import { PresetBar } from "@/components/screener/PresetBar";
 import { RunControls } from "@/components/screener/RunControls";
 import { ConnectionStatus } from "@/components/screener/ConnectionStatus";
 import { FilterSidebar } from "@/components/screener/FilterSidebar";
-import { useScreener } from "@/hooks/useScreener";
+import { useScreenerContext } from "@/contexts/ScreenerContext";
 import { useUserSettings } from "@/hooks/useUserSettings";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { appEnv } from "@/config/env";
@@ -11,7 +11,7 @@ import { appEnv } from "@/config/env";
 const API_BASE = appEnv.apiBase.replace(/\/screen$/, "");
 
 const Index = () => {
-  const state = useScreener();
+  const state = useScreenerContext();
   const {
     settings,
     loading: settingsLoading,
@@ -50,7 +50,7 @@ const Index = () => {
                   </p>
                   <h1 className="text-xl font-semibold text-foreground">Results workspace</h1>
                 </div>
-                <ConnectionStatus apiBase={API_BASE} />
+                <ConnectionStatus apiBase={API_BASE} isScanning={state.loading} errorMessage={state.errorMessage} />
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
