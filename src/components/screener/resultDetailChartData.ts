@@ -354,6 +354,167 @@ export function resolveConfluenceHighlightTimes(
   }));
 }
 
+// --------------------------------------------------------------
+// Per-candle "why was this candle chosen" reasons, color-coded per
+// filter/source so multiple filters can be told apart on the chart.
+// --------------------------------------------------------------
+
+export const CONFLUENCE_SOURCE_COLORS = ["#a78bfa", "#f59e0b"] as const;
+export const CHANNEL_RESPECT_HIGHLIGHT_COLOR = "#00e5ff";
+export const LIQUIDITY_SWEEP_HIGHLIGHT_COLOR = "#22d3ee";
+
+export interface CandleMatchReason {
+  color: string;
+  label: string;
+  detail: string;
+}
+
+const CONFLUENCE_SCENARIO_LABELS: Record<string, string> = {
+  dual_support: "Dual Support",
+  stacked_support: "Stacked Support",
+  dual_resistance_break: "Dual Resistance Break",
+  support_then_resistance_break: "Support Then Break",
+  resistance_break_then_support: "Break Then Support",
+  role_reversal: "Role Reversal",
+  stacked_resistance: "Stacked Resistance",
+  clustered_resistance: "Clustered Resistance",
+};
+
+function confluenceScenarioLabel(scenario: unknown): string {
+  const key = String(scenario ?? "").trim().toLowerCase();
+  return CONFLUENCE_SCENARIO_LABELS[key] ?? "Channel Confluence";
+}
+
+function formatChannelTypeLabel(channelType: string): string {
+  const normalized = channelType.trim().toLowerCase();
+  if (normalized === "lrc") return "LRC";
+  if (normalized === "regression") return "Regression Channel";
+  if (normalized === "trend") return "Trend Channel";
+  return channelType;
+}
+
+function normalizedCandleTime(value: unknown): number | null {
+  const parsed = finiteNumber(value);
+  if (parsed === null) return null;
+  return parsed > 10_000_000_000 ? Math.floor(parsed / 1000) : Math.floor(parsed);
+}
+
+function addCandleReason(
+  reasons: Map<number, CandleMatchReason[]>,
+  time: number,
+  reason: CandleMatchReason,
+): void {
+  const existing = reasons.get(time) ?? [];
+  if (existing.some((item) => item.label === reason.label && item.detail === reason.detail)) {
+    return;
+  }
+  reasons.set(time, [...existing, reason]);
+}
+
+/**
+ * Builds a per-candle-time map of *why* each candle was highlighted by the
+ * Channel Confluence filter: which source (with its own color) confirmed
+ * its line there, under which scenario, plus any liquidity-sweep candle.
+ */
+export function resolveConfluenceCandleReasons(
+  filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
+  confluenceSources: ConfluenceChartSource[] = [],
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+  const detail = filterDetails.find((item) => item.name === "confluence" && item.passed);
+  if (!detail) return reasons;
+
+  const scenarioLabel = confluenceScenarioLabel(detail.details?.match_scenario);
+  const colorBySource = new Map(
+    confluenceSources.map((source, index) => [
+      source.sourceId,
+      CONFLUENCE_SOURCE_COLORS[index] ?? CONFLUENCE_SOURCE_COLORS[0],
+    ]),
+  );
+
+  const sourceMatches = Array.isArray(detail.details?.source_matches)
+    ? (detail.details.source_matches as Array<Record<string, unknown>>)
+    : [];
+
+  sourceMatches.forEach((match, index) => {
+    const time = normalizedCandleTime(match.candle_time);
+    if (time === null) return;
+
+    const sourceId = String(match.source_id ?? "");
+    const channelType = String(match.channel_type ?? "");
+    const selection = String(match.selection ?? "").replace(/_/g, " ");
+    const color = colorBySource.get(sourceId) ?? CONFLUENCE_SOURCE_COLORS[index] ?? CONFLUENCE_SOURCE_COLORS[0];
+
+    addCandleReason(reasons, time, {
+      color,
+      label: `Source ${index + 1} — ${formatChannelTypeLabel(channelType)} ${selection}`,
+      detail: `${scenarioLabel}: Source ${index + 1} confirmed its line on this candle.`,
+    });
+  });
+
+  const matchedIndexes = Array.isArray(detail.details?.matched_candle_indexes)
+    ? (detail.details.matched_candle_indexes as unknown[])
+    : [];
+  const matchedTimes = Array.isArray(detail.details?.matched_candle_times)
+    ? (detail.details.matched_candle_times as unknown[])
+    : [];
+  const sourceMatchIndexes = new Set(
+    sourceMatches.map((match) => finiteNumber(match.candle_index)),
+  );
+
+  matchedIndexes.forEach((rawIndex, position) => {
+    const index = finiteNumber(rawIndex);
+    if (index === null || sourceMatchIndexes.has(index)) return;
+    const time = normalizedCandleTime(matchedTimes[position]);
+    if (time === null) return;
+
+    addCandleReason(reasons, time, {
+      color: LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
+      label: "Liquidity Sweep",
+      detail: "Price swept liquidity beyond the line before confluence was confirmed.",
+    });
+  });
+
+  return reasons;
+}
+
+/**
+ * Builds a per-candle-time map of *why* each candle was highlighted by the
+ * Channel Respect filter, for the currently displayed channel chart.
+ */
+export function resolveChannelRespectCandleReasons(
+  filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
+  requestFilters?: Record<string, unknown> | null,
+  mode?: string,
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+  const channelRespect = requestFilters?.channel_respect;
+  if (!channelRespect || typeof channelRespect !== "object") return reasons;
+
+  const channelType = String(
+    (channelRespect as Record<string, unknown>).channel_type || "",
+  ).trim().toLowerCase();
+  if (!channelType || channelType !== mode) return reasons;
+
+  const line = String((channelRespect as Record<string, unknown>).line || "middle").replace(/_/g, " ");
+  const detail = filterDetails.find((item) => item.name === "channel_respect" && item.passed);
+  const rawTimes = detail?.details?.matched_candle_times;
+  if (!Array.isArray(rawTimes)) return reasons;
+
+  rawTimes.forEach((value) => {
+    const time = normalizedCandleTime(value);
+    if (time === null) return;
+
+    addCandleReason(reasons, time, {
+      color: CHANNEL_RESPECT_HIGHLIGHT_COLOR,
+      label: "Channel Respect",
+      detail: `Price touched the ${formatChannelTypeLabel(channelType)} ${line} line/zone.`,
+    });
+  });
+
+  return reasons;
+}
+
 export function resolveChannelRespectHighlightTimes(
   filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
   requestFilters?: Record<string, unknown> | null,

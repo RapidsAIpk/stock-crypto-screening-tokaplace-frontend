@@ -14,17 +14,21 @@ import {
 } from "lightweight-charts";
 import type { FilterDetail, IndicatorDetail, MarketCandle } from "@/types/screener";
 import {
+  CHANNEL_RESPECT_HIGHLIGHT_COLOR,
+  CONFLUENCE_SOURCE_COLORS,
   createLinearRegressionCandles,
+  LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
   normalizeConfluenceChartSources,
   normalizeLrcChannel,
   normalizeMarketCandles,
   normalizeRegressionChannel,
   normalizeTrendChannel,
   regressionValueAt,
-  resolveConfluenceHighlightTimes,
-  resolveChannelRespectHighlightTimes,
+  resolveChannelRespectCandleReasons,
   resolveChartChannelVisibility,
+  resolveConfluenceCandleReasons,
   trendValueAt,
+  type CandleMatchReason,
   type ChartCandle,
   type ConfluenceChartSource,
   type LinRegSettings,
@@ -41,6 +45,12 @@ import {
 
 type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg";
 type RangeOption = 20 | 50 | 100 | "all";
+type TrendyAdxPoint = {
+  time: number;
+  plusDi: number | null;
+  minusDi: number | null;
+  adx: number | null;
+};
 
 interface Props {
   candles: Array<MarketCandle | Record<string, unknown>>;
@@ -55,14 +65,18 @@ interface Props {
   provider?: string | null;
 }
 
+interface CandleTooltipState {
+  x: number;
+  y: number;
+  time: number;
+  reasons: CandleMatchReason[];
+}
 
 const TV_GRID = "#24282f";
 const TV_TEXT = "#b2b5be";
 const TV_BORDER = "#2a2e39";
 const UP_COLOR = "#089981";
 const DOWN_COLOR = "#f23645";
-const FILTER_CANDLE_OUTLINE = "#00e5ff";
-const CONFLUENCE_SOURCE_COLORS = ["#a78bfa", "#f59e0b"] as const;
 
 function confluenceValueAt(
   source: ConfluenceChartSource,
@@ -85,6 +99,87 @@ function compactVolume(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
   return value.toFixed(0);
+}
+
+function finiteIndicatorValue(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function createTrendyAdxPoints(candles: ChartCandle[], length: number): TrendyAdxPoint[] {
+  if (candles.length === 0) return [];
+
+  const plusDi: Array<number | null> = Array(candles.length).fill(null);
+  const minusDi: Array<number | null> = Array(candles.length).fill(null);
+  const adx: Array<number | null> = Array(candles.length).fill(null);
+  const trueRanges = Array(candles.length).fill(0);
+  const plusDm = Array(candles.length).fill(0);
+  const minusDm = Array(candles.length).fill(0);
+
+  for (let index = 1; index < candles.length; index += 1) {
+    const candle = candles[index];
+    const previous = candles[index - 1];
+    trueRanges[index] = Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previous.close),
+      Math.abs(candle.low - previous.close),
+    );
+
+    const upMove = candle.high - previous.high;
+    const downMove = previous.low - candle.low;
+    plusDm[index] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDm[index] = downMove > upMove && downMove > 0 ? downMove : 0;
+  }
+
+  let smoothedTr = 0;
+  let smoothedPlus = 0;
+  let smoothedMinus = 0;
+  const dx: Array<number | null> = Array(candles.length).fill(null);
+
+  for (let index = 1; index < candles.length; index += 1) {
+    if (index <= length) {
+      smoothedTr += trueRanges[index];
+      smoothedPlus += plusDm[index];
+      smoothedMinus += minusDm[index];
+    } else {
+      smoothedTr = smoothedTr - (smoothedTr / length) + trueRanges[index];
+      smoothedPlus = smoothedPlus - (smoothedPlus / length) + plusDm[index];
+      smoothedMinus = smoothedMinus - (smoothedMinus / length) + minusDm[index];
+    }
+
+    if (index >= length && smoothedTr > 0) {
+      const plus = (100 * smoothedPlus) / smoothedTr;
+      const minus = (100 * smoothedMinus) / smoothedTr;
+      plusDi[index] = plus;
+      minusDi[index] = minus;
+      dx[index] = plus + minus === 0 ? 0 : (100 * Math.abs(plus - minus)) / (plus + minus);
+    }
+  }
+
+  let adxSeed = 0;
+  let adxSeedCount = 0;
+  for (let index = length; index < candles.length; index += 1) {
+    const dxValue = dx[index];
+    if (dxValue === null) continue;
+    if (adxSeedCount < length) {
+      adxSeed += dxValue;
+      adxSeedCount += 1;
+      if (adxSeedCount === length) {
+        adx[index] = adxSeed / length;
+      }
+      continue;
+    }
+
+    const previousAdx = adx[index - 1];
+    adx[index] = previousAdx === null ? dxValue : ((previousAdx * (length - 1)) + dxValue) / length;
+  }
+
+  return candles.map((candle, index) => ({
+    time: candle.time,
+    plusDi: plusDi[index],
+    minusDi: minusDi[index],
+    adx: adx[index],
+  }));
 }
 
 function decimalPlaces(value: number): number {
@@ -137,16 +232,130 @@ function linRegSettings(indicator: IndicatorDetail): LinRegSettings {
 
 function toCandleData(
   candles: ChartCandle[],
-  highlightedTimes: Set<number> = new Set(),
+  candleReasons: Map<number, CandleMatchReason[]> = new Map(),
 ): CandlestickData<UTCTimestamp>[] {
-  return candles.map((candle) => ({
-    time: candle.time as UTCTimestamp,
-    open: candle.open,
-    high: candle.high,
-    low: candle.low,
-    close: candle.close,
-    ...(highlightedTimes.has(candle.time) ? { borderColor: FILTER_CANDLE_OUTLINE } : {}),
-  }));
+  return candles.map((candle) => {
+    const reasons = candleReasons.get(candle.time);
+    return {
+      time: candle.time as UTCTimestamp,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      ...(reasons?.length ? { borderColor: reasons[0].color } : {}),
+    };
+  });
+}
+
+function TrendyAdxPane({
+  points,
+  threshold,
+  topLevel,
+}: {
+  points: TrendyAdxPoint[];
+  threshold: number;
+  topLevel: number;
+}) {
+  const height = 170;
+  const width = Math.max(2, points.length - 1);
+  const values = points.flatMap((point) => [point.plusDi, point.minusDi, point.adx])
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const maxValue = Math.max(50, threshold, topLevel, ...values);
+  const yForValue = (value: number) => height - 18 - ((value / maxValue) * (height - 32));
+  const xForIndex = (index: number) => points.length <= 1 ? 0 : (index / (points.length - 1)) * width;
+  const pathFor = (key: keyof Pick<TrendyAdxPoint, "plusDi" | "minusDi" | "adx">) => {
+    let started = false;
+    return points.reduce((path, point, index) => {
+      const value = point[key];
+      if (value === null) {
+        started = false;
+        return path;
+      }
+      const command = started ? "L" : "M";
+      started = true;
+      return `${path} ${command}${xForIndex(index).toFixed(3)},${yForValue(value).toFixed(3)}`;
+    }, "").trim();
+  };
+  const latest = [...points].reverse().find((point) => (
+    point.plusDi !== null || point.minusDi !== null || point.adx !== null
+  ));
+  const thresholdY = yForValue(threshold);
+
+  return (
+    <div className="border-t border-[#2a2e39] bg-[#0b0e11]">
+      <div className="relative h-[170px] overflow-hidden">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="none"
+          className="absolute inset-0 h-full w-full"
+          aria-label="Trendy ADX DI plus DI minus trend pane"
+        >
+          {points.map((point, index) => {
+            const plus = point.plusDi ?? 0;
+            const minus = point.minusDi ?? 0;
+            const adx = point.adx ?? 0;
+            const strongTrend = adx >= threshold;
+            const color = plus >= minus ? "#008000" : "#b00000";
+            const opacity = strongTrend ? 0.72 : 0.42;
+            return (
+              <rect
+                key={point.time}
+                x={xForIndex(index)}
+                y={0}
+                width={Math.max(1, width / Math.max(1, points.length - 1))}
+                height={height}
+                fill={color}
+                opacity={opacity}
+              />
+            );
+          })}
+          {[0.25, 0.5, 0.75].map((ratio) => (
+            <line
+              key={ratio}
+              x1={0}
+              x2={width}
+              y1={height * ratio}
+              y2={height * ratio}
+              stroke="#24282f"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          <line
+            x1={0}
+            x2={width}
+            y1={thresholdY}
+            y2={thresholdY}
+            stroke={ADX_THRESHOLD_COLOR}
+            strokeDasharray="5 5"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <path d={pathFor("plusDi")} fill="none" stroke={ADX_PLUS_COLOR} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+          <path d={pathFor("minusDi")} fill="none" stroke={ADX_MINUS_COLOR} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+          <path d={pathFor("adx")} fill="none" stroke={ADX_STRENGTH_COLOR} strokeWidth={3} vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
+          <span>Trendy ADX</span>
+          {latest?.adx != null ? <span style={{ color: ADX_STRENGTH_COLOR }}>{latest.adx.toFixed(3)}</span> : null}
+          {latest?.minusDi != null ? <span style={{ color: ADX_MINUS_COLOR }}>{latest.minusDi.toFixed(3)}</span> : null}
+          {latest?.plusDi != null ? <span style={{ color: ADX_PLUS_COLOR }}>{latest.plusDi.toFixed(3)}</span> : null}
+        </div>
+        <div className="absolute right-2 top-4 space-y-2 font-mono text-xs font-bold">
+          {latest?.adx != null ? (
+            <div className="bg-[#111317] px-2 py-1" style={{ color: ADX_STRENGTH_COLOR }}>{latest.adx.toFixed(3)}</div>
+          ) : null}
+          {latest?.minusDi != null ? (
+            <div className="px-2 py-1 text-white" style={{ backgroundColor: ADX_MINUS_COLOR }}>{latest.minusDi.toFixed(3)}</div>
+          ) : null}
+          {latest?.plusDi != null ? (
+            <div className="px-2 py-1 text-white" style={{ backgroundColor: ADX_PLUS_COLOR }}>{latest.plusDi.toFixed(3)}</div>
+          ) : null}
+          <div className="bg-[#787b86] px-2 py-1 text-white">{threshold.toFixed(3)}</div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ResultDetailChart({
@@ -178,6 +387,7 @@ export function ResultDetailChart({
   );
   const showConfluenceChart = confluenceSources.length === 2;
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
+  const adxIndicator = indicatorDetails.find((item) => item.name === "adx");
   const channelVisibility = useMemo(
     () => resolveChartChannelVisibility(indicatorDetails, requestFilters),
     [indicatorDetails, requestFilters],
@@ -192,6 +402,13 @@ export function ResultDetailChart({
   const linRegCandles = useMemo(
     () => createLinearRegressionCandles(completedCandles, settings),
     [completedCandles, settings],
+  );
+  const adxLength = positiveInteger(adxIndicator?.config.length, 11);
+  const adxThreshold = finiteIndicatorValue(adxIndicator?.config.threshold, 20);
+  const adxTopLevel = finiteIndicatorValue(adxIndicator?.config.top_level, 19);
+  const adxPoints = useMemo(
+    () => createTrendyAdxPoints(completedCandles, adxLength),
+    [adxLength, completedCandles],
   );
   const requestedChannelType = String(
     (requestFilters?.channel_respect as Record<string, unknown> | undefined)?.channel_type || "",
@@ -224,6 +441,7 @@ export function ResultDetailChart({
   );
   const [range, setRange] = useState<RangeOption>(100);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
+  const [candleTooltip, setCandleTooltip] = useState<CandleTooltipState | null>(null);
 
   useEffect(() => {
     const modeAvailable = (
@@ -248,18 +466,22 @@ export function ResultDetailChart({
   const source: ChartCandle[] = mode === "linreg" && linRegIndicator
     ? linRegCandles
     : completedCandles;
-  const channelRespectHighlightTimes = useMemo(
-    () => resolveChannelRespectHighlightTimes(filterDetails, requestFilters, mode),
+  const channelRespectCandleReasons = useMemo(
+    () => resolveChannelRespectCandleReasons(filterDetails, requestFilters, mode),
     [filterDetails, mode, requestFilters],
   );
-  const confluenceHighlightTimes = useMemo(
-    () => resolveConfluenceHighlightTimes(filterDetails),
-    [filterDetails],
+  const confluenceCandleReasons = useMemo(
+    () => resolveConfluenceCandleReasons(filterDetails, confluenceSources),
+    [confluenceSources, filterDetails],
   );
-  const highlightedTimes = mode === "confluence"
-    ? confluenceHighlightTimes
-    : channelRespectHighlightTimes;
+  const candleReasons = mode === "confluence"
+    ? confluenceCandleReasons
+    : channelRespectCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
+  const visibleAdxPoints = useMemo(() => {
+    if (range === "all") return adxPoints;
+    return adxPoints.slice(-range);
+  }, [adxPoints, range]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
     const index = source.findIndex((candle) => candle.time === hoveredTime);
@@ -404,7 +626,7 @@ export function ResultDetailChart({
       priceLineColor: DOWN_COLOR,
       lastValueVisible: true,
     });
-    candleSeries.setData(toCandleData(source, highlightedTimes));
+    candleSeries.setData(toCandleData(source, candleReasons));
 
     const addLine = (
       color: string,
@@ -506,7 +728,15 @@ export function ResultDetailChart({
     };
 
     chart.subscribeCrosshairMove((parameter) => {
-      setHoveredTime(parameter.time === undefined ? null : unixTime(parameter.time));
+      const time = parameter.time === undefined ? null : unixTime(parameter.time);
+      setHoveredTime(time);
+
+      const reasons = time === null ? undefined : candleReasons.get(time);
+      if (time !== null && reasons?.length && parameter.point) {
+        setCandleTooltip({ x: parameter.point.x, y: parameter.point.y, time, reasons });
+      } else {
+        setCandleTooltip(null);
+      }
     });
 
     const observer = new ResizeObserver((entries) => {
@@ -519,8 +749,9 @@ export function ResultDetailChart({
       observer.disconnect();
       resetViewRef.current = () => undefined;
       chart.remove();
+      setCandleTooltip(null);
     };
-  }, [confluenceSources, highlightedTimes, lrcChannel, mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
+  }, [candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
 
   if (!completedCandles.length) {
     return (
@@ -704,21 +935,74 @@ export function ResultDetailChart({
         ) : null}
       </div>
 
-      <div
-        ref={chartHostRef}
-        data-testid="trading-chart-canvas"
-        className="h-[560px] w-full bg-[#0b0e11]"
-      />
+      <div className="relative">
+        <div
+          ref={chartHostRef}
+          data-testid="trading-chart-canvas"
+          className="h-[560px] w-full bg-[#0b0e11]"
+        />
+
+        {candleTooltip ? (
+          <div
+            className="pointer-events-none absolute z-20 max-w-xs rounded-md border border-[#2a2e39] bg-[#151922]/95 px-3 py-2 text-[11px] shadow-xl"
+            style={{
+              left: Math.min(candleTooltip.x + 14, Math.max(0, (chartHostRef.current?.clientWidth ?? 0) - 260)),
+              top: Math.max(0, candleTooltip.y - 8),
+            }}
+          >
+            <div className="mb-1 text-[10px] text-[#787b86]">{formatTime(candleTooltip.time, timeZone)}</div>
+            <div className="space-y-1.5">
+              {candleTooltip.reasons.map((reason, index) => (
+                <div key={`${reason.label}-${index}`} className="flex items-start gap-1.5">
+                  <span
+                    className="mt-0.5 h-2.5 w-2.5 flex-none rounded-sm border-2"
+                    style={{ borderColor: reason.color }}
+                  />
+                  <div>
+                    <div className="font-semibold text-white">{reason.label}</div>
+                    <div className="text-[#b2b5be]">{reason.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {adxIndicator && visibleAdxPoints.some((point) => point.plusDi !== null || point.minusDi !== null || point.adx !== null) ? (
+        <TrendyAdxPane
+          points={visibleAdxPoints}
+          threshold={adxThreshold}
+          topLevel={adxTopLevel}
+        />
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
         <span>
-          Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset
+          Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset · hover an outlined candle for why it matched
         </span>
         <div className="flex flex-wrap items-center gap-3">
-          {highlightedTimes.size ? (
+          {mode === "confluence" && candleReasons.size ? (
+            <>
+              {confluenceSources.map((confluenceSource, index) => (
+                <span key={confluenceSource.sourceId} className="flex items-center gap-1.5 text-[#9ca3af]">
+                  <span
+                    className="h-2.5 w-2.5 border-2"
+                    style={{ borderColor: CONFLUENCE_SOURCE_COLORS[index] ?? CONFLUENCE_SOURCE_COLORS[0] }}
+                  />
+                  Source {index + 1} match
+                </span>
+              ))}
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: LIQUIDITY_SWEEP_HIGHLIGHT_COLOR }} />
+                Liquidity sweep
+              </span>
+            </>
+          ) : null}
+          {mode !== "confluence" && candleReasons.size ? (
             <span className="flex items-center gap-1.5 text-[#9ca3af]">
-              <span className="h-2.5 w-2.5 border-2 border-[#00e5ff]" />
-              Cyan outline = candle matched by {mode === "confluence" ? "Confluence" : "Channel Respect"}
+              <span className="h-2.5 w-2.5 border-2" style={{ borderColor: CHANNEL_RESPECT_HIGHLIGHT_COLOR }} />
+              Channel Respect match
             </span>
           ) : null}
           <span>{timeZone} · completed bars only · {source.length} bars</span>

@@ -6,7 +6,7 @@ export function getIndicatorColor(badge: string, indicatorConfigs?: IndicatorCon
   // If badge is Trendy ADX, check if a specific background_color is configured
   if (lowered.includes("adx")) {
     const adxConfig = indicatorConfigs?.find((ind) => ind.name === "adx")?.config;
-    const bgColorChoice = String(adxConfig?.background_color ?? "green").toLowerCase();
+    const bgColorChoice = String(adxConfig?.background_color ?? "green").trim().toLowerCase();
 
     if (bgColorChoice === "red") {
       return {
@@ -15,7 +15,7 @@ export function getIndicatorColor(badge: string, indicatorConfigs?: IndicatorCon
         border: "border-red-500/50",
       };
     }
-    if (bgColorChoice === "green") {
+    if (bgColorChoice === "green" || bgColorChoice === "black") {
       return {
         bg: "bg-emerald-500/20",
         text: "text-emerald-300 font-semibold",

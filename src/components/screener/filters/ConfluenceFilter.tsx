@@ -4,6 +4,7 @@ import {
   describeConfluenceSelectionConstraint,
   formatConfluenceSelectionLabel,
   getAllowedConfluenceSelections,
+  getConfluenceSelectionOptions,
   getDefaultChannelLength,
   getDefaultConfluenceConfig,
   getDefaultConfluenceSelection,
@@ -13,9 +14,9 @@ import {
   sanitizeConfluenceUiConfig,
   wouldDuplicateConfluenceSource,
 } from "@/types/screener";
-import type { ChannelType, Confluence } from "@/types/screener";
+import type { ChannelType, Confluence, ConfluenceLineRelation } from "@/types/screener";
 import { FieldLabel, FilterToggle } from "./FilterUi";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 interface Props {
   value: Confluence | null;
@@ -62,6 +63,14 @@ export function ConfluenceFilter({ value, onChange }: Props) {
     }
   }, [current, normalized, onChange]);
 
+  // Kept as free-typed text so the field can be cleared/backspaced while
+  // typing a custom multi-digit lookback, instead of snapping back to a
+  // clamped number on every keystroke.
+  const [lookbackText, setLookbackText] = useState(String(current?.lookback_candles ?? 4));
+  useEffect(() => {
+    setLookbackText(String(current?.lookback_candles ?? 4));
+  }, [current?.lookback_candles]);
+
   const applyConfig = (next: Confluence | null) => {
     if (!next) {
       onChange(null);
@@ -89,6 +98,7 @@ export function ConfluenceFilter({ value, onChange }: Props) {
       liquidity_sweep: defaults.liquidity_sweep,
       lookback_candles: defaults.lookback_candles,
       tolerance_pct: defaults.tolerance_pct,
+      reclose_to_first_line: defaults.reclose_to_first_line,
     });
   };
 
@@ -257,7 +267,7 @@ export function ConfluenceFilter({ value, onChange }: Props) {
                     key={source.id}
                     className="space-y-2 rounded-md border border-border/70 p-2.5"
                   >
-                    <div className="grid grid-cols-[1fr_1fr_92px] gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="space-y-1.5">
                         <FieldLabel>Source {index + 1} Indicator</FieldLabel>
                         <select
@@ -333,6 +343,84 @@ export function ConfluenceFilter({ value, onChange }: Props) {
                         ? ` Minimum length here is ${minLength} because Source 1 uses the same channel type.`
                         : ""}
                     </div>
+
+                    <div className="space-y-3 border-t border-border/50 pt-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <FieldLabel info="Optional: require price to close above/below any line of this indicator, independent of the line used above.">
+                            Close Relation
+                          </FieldLabel>
+                          <select
+                            value={source.line_relation ?? "none"}
+                            onChange={(e) =>
+                              updateSource(source.id, {
+                                line_relation: e.target.value as ConfluenceLineRelation,
+                              })
+                            }
+                            className={inputClass}
+                          >
+                            <option value="none">None</option>
+                            <option value="close_above">Close Above</option>
+                            <option value="close_below">Close Below</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <FieldLabel>Target Line</FieldLabel>
+                          <select
+                            value={source.target_line ?? source.selection}
+                            disabled={(source.line_relation ?? "none") === "none"}
+                            onChange={(e) =>
+                              updateSource(source.id, {
+                                target_line: e.target.value as NonNullable<Confluence["sources"]>[number]["target_line"],
+                              })
+                            }
+                            className={`${inputClass} capitalize disabled:opacity-50`}
+                          >
+                            {getConfluenceSelectionOptions(source.channel_type).map((selection) => (
+                              <option key={selection} value={selection}>
+                                {formatConfluenceSelectionLabel(selection)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <FieldLabel>Min Bars</FieldLabel>
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={(source.line_relation ?? "none") === "none"}
+                            value={source.candles_since_close_min ?? ""}
+                            onChange={(e) =>
+                              updateSource(source.id, {
+                                candles_since_close_min:
+                                  e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
+                              })
+                            }
+                            className={`${inputClass} disabled:opacity-50`}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <FieldLabel>Max Bars</FieldLabel>
+                          <input
+                            type="number"
+                            min={0}
+                            disabled={(source.line_relation ?? "none") === "none"}
+                            value={source.candles_since_close_max ?? ""}
+                            onChange={(e) =>
+                              updateSource(source.id, {
+                                candles_since_close_max:
+                                  e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
+                              })
+                            }
+                            className={`${inputClass} disabled:opacity-50`}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -350,22 +438,42 @@ export function ConfluenceFilter({ value, onChange }: Props) {
             </FieldLabel>
           </div>
 
+          {signalType === "bullish" && (
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => update({ reclose_to_first_line: !current.reclose_to_first_line })}
+                className={`h-4 w-4 rounded border transition-colors ${current.reclose_to_first_line ? "bg-primary border-primary" : "border-border"}`}
+              />
+              <FieldLabel info="After Source 1 breaks and Source 2 holds as support, also require price to close back at/above Source 1's line.">
+                Require re-close to Source 1 line
+              </FieldLabel>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <FieldLabel>Lookback Candles</FieldLabel>
               <input
-                type="number"
-                min="1"
-                max="4"
-                value={current.lookback_candles}
-                onChange={(e) =>
-                  update({
-                    lookback_candles: Math.min(
-                      4,
-                      Math.max(1, Number(e.target.value) || 1),
-                    ),
-                  })
-                }
+                type="text"
+                inputMode="numeric"
+                value={lookbackText}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (!/^\d*$/.test(raw)) {
+                    return;
+                  }
+                  setLookbackText(raw);
+                  if (raw !== "") {
+                    update({ lookback_candles: Math.max(1, Number(raw) || 1) });
+                  }
+                }}
+                onBlur={() => {
+                  if (lookbackText === "" || Number(lookbackText) < 1) {
+                    setLookbackText("1");
+                    update({ lookback_candles: 1 });
+                  }
+                }}
                 className={inputClass}
               />
             </div>
