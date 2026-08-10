@@ -13,7 +13,7 @@ import {
   Star,
 } from "lucide-react";
 import { INDICATOR_CATEGORY_MAP } from "@/types/screener";
-import type { ScreenerResult, ScreenerResultDetail, ScreenerResultsBulkExport, IndicatorCategory, ScanProgressState } from "@/types/screener";
+import type { ScreenerResult, ScreenerResultDetail, ScreenerResultsBulkExport, IndicatorCategory, ScanProgressState, IndicatorConfig } from "@/types/screener";
 import { ResultDetailPanel } from "./ResultDetailPanel";
 import { ScanProgressPanel } from "./ScanProgressPanel";
 import { getIndicatorColor } from "./indicatorColors";
