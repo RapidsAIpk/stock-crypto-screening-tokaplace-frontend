@@ -36,7 +36,7 @@ describe("normalizeConfluenceConfig", () => {
     expect(config?.type).toBe("any");
   });
 
-  it("normalizes legacy role reversal configs into two explicit sources", () => {
+  it("preserves role reversal requests with resistance/support defaults", () => {
     const config = normalizeConfluenceConfig({
       type: "role_reversal",
       channels: ["trend", "lrc", "regression"],
@@ -50,10 +50,10 @@ describe("normalizeConfluenceConfig", () => {
       tolerance_pct: 0.1,
     });
 
-    expect(config?.type).toBe("breakout");
+    expect(config?.type).toBe("role_reversal");
     expect(config?.sources).toHaveLength(2);
     expect(config?.sources?.[0].selection).toBe("top_line");
-    expect(config?.sources?.[1].selection).toBe("upper");
-    expect(config?.lookback_candles).toBe(4);
+    expect(config?.sources?.[1].selection).toBe("lower");
+    expect(config?.lookback_candles).toBe(9);
   });
 });

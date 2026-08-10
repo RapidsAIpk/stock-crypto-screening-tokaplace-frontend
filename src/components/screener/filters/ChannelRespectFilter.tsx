@@ -5,6 +5,7 @@ import {
 import type { ChannelRespect, IndicatorConfig } from "@/types/screener";
 import { FieldLabel, FilterToggle } from "./FilterUi";
 import { InfoTip } from "@/components/ui/info-tip";
+import { useDeferredNumberField } from "@/hooks/useDeferredNumberField";
 
 interface Props {
   value: ChannelRespect | null;
@@ -35,6 +36,13 @@ export function ChannelRespectFilter({ value, onChange, indicators = [] }: Props
   const update = (patch: Partial<ChannelRespect>) => {
     if (value) onChange({ ...value, ...patch });
   };
+
+  const tolerancePctField = useDeferredNumberField(value?.tolerance_pct ?? 0, (parsed) => {
+    update({ tolerance_pct: parsed || 0 });
+  });
+  const clusterGapField = useDeferredNumberField(value?.cluster_gap ?? 3, (parsed) => {
+    update({ cluster_gap: Math.min(5, Math.max(3, parsed || 3)) });
+  });
 
   const lineToSelection = (line?: ChannelRespect["line"]) => {
     switch (line) {
@@ -173,8 +181,9 @@ export function ChannelRespectFilter({ value, onChange, indicators = [] }: Props
                 type="number"
                 min="0"
                 step="0.1"
-                value={value.tolerance_pct}
-                onChange={(e) => update({ tolerance_pct: Number(e.target.value) || 0 })}
+                value={tolerancePctField.rawText}
+                onChange={tolerancePctField.onChange}
+                onBlur={tolerancePctField.onBlur}
                 className={inputClass}
               />
             </div>
@@ -198,8 +207,9 @@ export function ChannelRespectFilter({ value, onChange, indicators = [] }: Props
                 type="number"
                 min="3"
                 max="5"
-                value={value.cluster_gap}
-                onChange={(e) => update({ cluster_gap: Math.min(5, Math.max(3, Number(e.target.value) || 3)) })}
+                value={clusterGapField.rawText}
+                onChange={clusterGapField.onChange}
+                onBlur={clusterGapField.onBlur}
                 className={inputClass}
               />
             </div>

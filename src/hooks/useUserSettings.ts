@@ -77,7 +77,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   apiKey: "",
   adminApiToken: "",
   apiBaseOverride: "",
-  apiTimeoutMs: 48000,
+  apiTimeoutMs: 600000,
   apiRetries: 0,
   workerPollInterval: 15,
   workerBatchSize: 50,

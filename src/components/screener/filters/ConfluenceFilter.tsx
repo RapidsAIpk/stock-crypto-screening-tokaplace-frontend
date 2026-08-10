@@ -16,6 +16,7 @@ import {
 } from "@/types/screener";
 import type { ChannelType, Confluence, ConfluenceLineRelation } from "@/types/screener";
 import { FieldLabel, FilterToggle } from "./FilterUi";
+import { useDeferredNumberField } from "@/hooks/useDeferredNumberField";
 import { useEffect, useMemo, useState } from "react";
 
 interface Props {
@@ -28,11 +29,13 @@ const TYPE_LABELS: Record<(typeof CONFLUENCE_UI_SIGNAL_TYPES)[number], string> =
   bullish: "Bullish",
   bearish: "Bearish",
   breakout: "Breakout",
+  role_reversal: "Role Reversal",
 };
 const TYPE_HELPERS: Record<(typeof CONFLUENCE_UI_SIGNAL_TYPES)[number], string> = {
   bullish: "Dual support across two different channel supports.",
   bearish: "Dual resistance across two different channel resistances.",
   breakout: "Resistance break or support-then-break sequence across two sources.",
+  role_reversal: "Source 1 breaks resistance, then Source 2 confirms the flip by holding as support within the same candle or next 3.",
 };
 
 const inputClass =
@@ -70,6 +73,10 @@ export function ConfluenceFilter({ value, onChange }: Props) {
   useEffect(() => {
     setLookbackText(String(current?.lookback_candles ?? 4));
   }, [current?.lookback_candles]);
+
+  const tolerancePctField = useDeferredNumberField(current?.tolerance_pct ?? 0, (parsed) => {
+    update({ tolerance_pct: parsed || 0 });
+  });
 
   const applyConfig = (next: Confluence | null) => {
     if (!next) {
@@ -323,15 +330,22 @@ export function ConfluenceFilter({ value, onChange }: Props) {
                         <input
                           type="number"
                           min={minLength}
-                          value={source.length}
-                          onChange={(e) =>
+                          // Uncontrolled + commit-on-blur: this input lives inside a
+                          // `.map()` over sources, so it can't hold its own hook state.
+                          // Keying on the committed length forces a remount (picking up
+                          // `defaultValue`) only when the value changes from elsewhere -
+                          // not on every keystroke - so typing "" then a new number
+                          // doesn't get overwritten by the old value on each render.
+                          key={`${source.id}-${source.length}`}
+                          defaultValue={source.length}
+                          onBlur={(e) => {
+                            const parsed = e.target.value === "" ? NaN : Number(e.target.value);
                             updateSource(source.id, {
-                              length: Math.max(
-                                minLength,
-                                Number(e.target.value) || getDefaultChannelLength(source.channel_type),
-                              ),
-                            })
-                          }
+                              length: Number.isFinite(parsed)
+                                ? Math.max(minLength, parsed)
+                                : getDefaultChannelLength(source.channel_type),
+                            });
+                          }}
                           className={inputClass}
                         />
                       </div>
@@ -438,7 +452,7 @@ export function ConfluenceFilter({ value, onChange }: Props) {
             </FieldLabel>
           </div>
 
-          {signalType === "bullish" && (
+          {(signalType === "bullish" || signalType === "role_reversal") && (
             <div className="flex items-center gap-2.5">
               <button
                 type="button"
@@ -483,8 +497,9 @@ export function ConfluenceFilter({ value, onChange }: Props) {
                 type="number"
                 min="0"
                 step="0.01"
-                value={current.tolerance_pct}
-                onChange={(e) => update({ tolerance_pct: Number(e.target.value) || 0 })}
+                value={tolerancePctField.rawText}
+                onChange={tolerancePctField.onChange}
+                onBlur={tolerancePctField.onBlur}
                 className={inputClass}
               />
             </div>

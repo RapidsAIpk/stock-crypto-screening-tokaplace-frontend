@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ScreenerProvider } from "@/contexts/ScreenerContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppHeader } from "@/components/layout/AppHeader";
@@ -47,15 +48,17 @@ const App = () => (
                   path="/*"
                   element={
                     <ProtectedRoute>
-                      <div className="min-h-screen bg-background">
-                        <AppHeader />
-                        <Routes>
-                          <Route path="/" element={<Index />} />
-                          <Route path="/watchlist" element={<WatchlistPage />} />
-                          <Route path="/settings" element={<SettingsPage />} />
-                          <Route path="*" element={<NotFound />} />
-                        </Routes>
-                      </div>
+                      <ScreenerProvider>
+                        <div className="min-h-screen bg-background">
+                          <AppHeader />
+                          <Routes>
+                            <Route path="/" element={<Index />} />
+                            <Route path="/watchlist" element={<WatchlistPage />} />
+                            <Route path="/settings" element={<SettingsPage />} />
+                            <Route path="*" element={<NotFound />} />
+                          </Routes>
+                        </div>
+                      </ScreenerProvider>
                     </ProtectedRoute>
                   }
                 />
