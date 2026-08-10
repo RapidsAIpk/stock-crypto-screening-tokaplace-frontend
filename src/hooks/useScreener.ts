@@ -118,6 +118,12 @@ function isNetworkError(error: unknown): boolean {
 
 class HttpStatusError extends Error {}
 
+// Thrown when the in-flight request was aborted because the user clicked
+// Stop, as opposed to the browser-native timeout abort - both raise the
+// same AbortError from fetch, but only the timeout case should be retried
+// or reported as "Request timed out"; a user cancel must stop immediately.
+class AbortedByUserError extends Error {}
+
 function retryDelayMs(attempt: number): number {
   return Math.min(4000, 500 * (attempt + 1));
 }
@@ -328,6 +334,12 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
   // Tracks the AbortController for the in-flight scan request so cancelScan
   // can abort it from outside callAPI.
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Set by cancelScan right before it aborts, so callAPI's catch block can
+  // tell "user pressed Stop" apart from "the timeout fired" - both produce
+  // an identical AbortError from fetch otherwise. Reset at the start of
+  // every run* call.
+  const cancelledRef = useRef(false);
 
   // Bumped by resetGateEntry (called by every filter setter). A run*
   // function captures this value before its request goes out; if it no
@@ -642,6 +654,10 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     body: ScreenerRequest | ScreenerDetailRequest,
     options?: { scanId?: string },
   ): Promise<T> => {
+    if (cancelledRef.current) {
+      throw new AbortedByUserError("Scan cancelled by user");
+    }
+
     const base = runtimeApiBase();
     const timeoutMs = runtimeTimeoutMs(accountRuntimeConfig?.apiTimeoutMs);
     const retries = runtimeRetries(accountRuntimeConfig?.apiRetries);
@@ -689,6 +705,10 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
 
         return res.json() as Promise<T>;
       } catch (error) {
+        if (cancelledRef.current) {
+          throw new AbortedByUserError("Scan cancelled by user");
+        }
+
         let retryable = false;
 
         if (isAbortError(error)) {
@@ -723,7 +743,21 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
   };
 
   const cancelScan = useCallback(async () => {
+    if (!isBusyRef.current) {
+      return;
+    }
+
     const scanId = activeScanId.current;
+    // Mark this as a user cancel BEFORE aborting - callAPI's catch block
+    // checks this flag to tell it apart from the browser-native timeout
+    // abort, which looks identical otherwise and would trigger a retry.
+    cancelledRef.current = true;
+    abortControllerRef.current?.abort();
+    endScan();
+    setLoading(false);
+    setStatusMessage("Scan cancelled.");
+    isBusyRef.current = false;
+
     if (scanId) {
       try {
         await fetch(`${runtimeApiBase()}/cancel`, {
@@ -732,14 +766,9 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
           body: JSON.stringify({ scan_id: scanId }),
         });
       } catch {
-        // Best-effort; aborting the in-flight request below still stops the UI.
+        // Best-effort; the abort above already stopped the UI regardless.
       }
     }
-    abortControllerRef.current?.abort();
-    endScan();
-    setLoading(false);
-    setStatusMessage("Scan cancelled.");
-    isBusyRef.current = false;
   }, [activeScanId, endScan]);
 
   const validateGateEntryTimeframes = useCallback(() => {
@@ -801,6 +830,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       return;
     }
     isBusyRef.current = true;
+    cancelledRef.current = false;
     setLoading(true);
     setErrorMessage("");
     const scanId = await beginScan();
@@ -831,7 +861,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       );
 
     } catch (e) {
-      if (filterGenerationRef.current === myFilterGeneration) {
+      if (filterGenerationRef.current === myFilterGeneration && !(e instanceof AbortedByUserError)) {
         setErrorMessage(e instanceof Error ? e.message : "Backend unavailable");
       }
 
@@ -856,6 +886,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       return;
     }
     isBusyRef.current = true;
+    cancelledRef.current = false;
     setLoading(true);
     setErrorMessage("");
     setEntryCompleted(false);
@@ -893,7 +924,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       );
 
     } catch (e) {
-      if (filterGenerationRef.current === myFilterGeneration) {
+      if (filterGenerationRef.current === myFilterGeneration && !(e instanceof AbortedByUserError)) {
         setErrorMessage(e instanceof Error ? e.message : "Gate scan failed");
       }
 
@@ -924,6 +955,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     }
 
     isBusyRef.current = true;
+    cancelledRef.current = false;
     setLoading(true);
     setErrorMessage("");
     const scanId = await beginScan();
@@ -954,7 +986,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       );
 
     } catch (e) {
-      if (filterGenerationRef.current === myFilterGeneration) {
+      if (filterGenerationRef.current === myFilterGeneration && !(e instanceof AbortedByUserError)) {
         setErrorMessage(e instanceof Error ? e.message : "Entry scan failed");
       }
 
@@ -981,6 +1013,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       return;
     }
     isBusyRef.current = true;
+    cancelledRef.current = false;
     setLoading(true);
     setErrorMessage("");
     setEntryCompleted(false);
@@ -1040,7 +1073,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       });
       setStatusMessage(`Gate completed (${gateResultsCount}) -> Entry completed (${entryResultsCount}).`);
     } catch (e) {
-      if (filterGenerationRef.current === myFilterGeneration) {
+      if (filterGenerationRef.current === myFilterGeneration && !(e instanceof AbortedByUserError)) {
         setErrorMessage(e instanceof Error ? e.message : "Gate-entry scan failed");
       }
     } finally {
