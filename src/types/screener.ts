@@ -1862,7 +1862,7 @@ export function getConfluenceSelectionOptions(
   return ["upper", "middle", "lower"] as const;
 }
 
-export const CONFLUENCE_UI_SIGNAL_TYPES = ["bullish", "bearish", "breakout"] as const;
+export const CONFLUENCE_UI_SIGNAL_TYPES = ["bullish", "bearish", "breakout", "role_reversal"] as const;
 export type ConfluenceUiSignalType = (typeof CONFLUENCE_UI_SIGNAL_TYPES)[number];
 
 export function isConfluenceUiSignalType(
@@ -1896,6 +1896,19 @@ function breakoutConfluenceSelections(
     : ["upper", "lower"];
 }
 
+// Role Reversal: Source 1 breaks a resistance line/zone, then Source 2
+// confirms the flip by holding as support within the next few candles.
+function roleReversalConfluenceSelections(
+  channelType: ChannelType,
+  sourceIndex: number,
+): readonly ConfluenceSelection[] {
+  if (sourceIndex === 0) {
+    return channelType === "trend" ? ["top_line", "top_zone"] : ["upper"];
+  }
+
+  return channelType === "trend" ? ["bottom_line", "bottom_zone"] : ["lower"];
+}
+
 export function getAllowedConfluenceSelections(
   confluenceType: ConfluenceUiSignalType,
   channelType: ChannelType,
@@ -1906,6 +1919,9 @@ export function getAllowedConfluenceSelections(
   }
   if (confluenceType === "bearish") {
     return [...BEARISH_CONFLUENCE_SELECTIONS[channelType]];
+  }
+  if (confluenceType === "role_reversal") {
+    return [...roleReversalConfluenceSelections(channelType, sourceIndex)];
   }
   return [...breakoutConfluenceSelections(channelType, sourceIndex)];
 }
@@ -2119,6 +2135,11 @@ export function describeConfluenceSelectionConstraint(
       ? "Bearish scans use resistance lines/zones only."
       : "Pick a different resistance line/zone than Source 1, or use a different channel/length.";
   }
+  if (confluenceType === "role_reversal") {
+    return sourceIndex === 0
+      ? "Role Reversal Source 1 uses resistance lines/zones — the level that breaks and flips to support."
+      : "Role Reversal Source 2 uses support lines/zones — confirms the flip within the next few candles.";
+  }
   return sourceIndex === 0
     ? "Breakout Source 1 uses resistance lines/zones."
     : "Breakout Source 2 can use resistance or support lines/zones.";
@@ -2207,10 +2228,9 @@ export function normalizeConfluenceConfig(confluence: Confluence | null): Conflu
     confluence.type === "bullish"
     || confluence.type === "bearish"
     || confluence.type === "breakout"
+    || confluence.type === "role_reversal"
     || confluence.type === "any"
       ? confluence.type
-      : confluence.type === "role_reversal"
-        ? "breakout"
       : "bullish";
 
   const fallbackChannelTypes: ChannelType[] =

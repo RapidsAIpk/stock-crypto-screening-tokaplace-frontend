@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Activity, Lock, LogOut, Play, RotateCcw, Save, Square } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserSettings } from "@/hooks/useUserSettings";
+import { useDeferredNumberField } from "@/hooks/useDeferredNumberField";
 import { toast } from "sonner";
 import { appEnv } from "@/config/env";
 import { getAllDefaultIndicatorConfigs } from "@/types/screener";
@@ -349,7 +350,7 @@ const SettingsPage = () => {
       return;
     }
 
-    const sanitizedTimeout = Math.min(300000, Math.max(1000, Number(apiTimeoutMs) || 48000));
+    const sanitizedTimeout = Math.min(900000, Math.max(1000, Number(apiTimeoutMs) || 600000));
     const sanitizedRetries = Math.max(0, Number(apiRetries) || 0);
     const sanitizedPoll = Math.max(1, Number(workerPollInterval) || 15);
     const sanitizedBatch = Math.max(1, Number(workerBatchSize) || 50);
@@ -456,6 +457,22 @@ const SettingsPage = () => {
     }
   };
 
+  const timeoutSecondsField = useDeferredNumberField(Math.round(apiTimeoutMs / 1000), (parsed) => {
+    setApiTimeoutMs(Math.min(600, Math.max(1, parsed || 48)) * 1000);
+  });
+  const retriesField = useDeferredNumberField(apiRetries, (parsed) => {
+    setApiRetries(Math.max(0, parsed));
+  });
+  const maxSymbolsField = useDeferredNumberField(maxSymbolsInput, (parsed) => {
+    setMaxSymbolsInput(Math.max(1, parsed || 1));
+  });
+  const pollIntervalField = useDeferredNumberField(workerPollInterval, (parsed) => {
+    setWorkerPollInterval(Math.max(1, parsed || 15));
+  });
+  const batchSizeField = useDeferredNumberField(workerBatchSize, (parsed) => {
+    setWorkerBatchSize(Math.max(1, parsed || 50));
+  });
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-6">
@@ -543,19 +560,17 @@ const SettingsPage = () => {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <FieldLabel info="Higher timeout helps slow networks; lower timeout fails fast. Maximum 300s (5 minutes).">
+              <FieldLabel info="Higher timeout helps slow networks; lower timeout fails fast. Maximum 600s (10 minutes).">
                 Request Timeout (seconds)
               </FieldLabel>
               <input
                 type="number"
                 min={1}
-                max={300}
+                max={600}
                 step={1}
-                value={Math.round(apiTimeoutMs / 1000)}
-                onChange={(e) => {
-                  const valInSec = Math.min(300, Math.max(1, Number(e.target.value) || 48));
-                  setApiTimeoutMs(valInSec * 1000);
-                }}
+                value={timeoutSecondsField.rawText}
+                onChange={timeoutSecondsField.onChange}
+                onBlur={timeoutSecondsField.onBlur}
                 className={inputClass}
               />
             </div>
@@ -567,8 +582,9 @@ const SettingsPage = () => {
                 type="number"
                 min={0}
                 max={5}
-                value={apiRetries}
-                onChange={(e) => setApiRetries(Number(e.target.value) || 0)}
+                value={retriesField.rawText}
+                onChange={retriesField.onChange}
+                onBlur={retriesField.onBlur}
                 className={inputClass}
               />
             </div>
@@ -620,8 +636,9 @@ const SettingsPage = () => {
                 <input
                   type="number"
                   min={1}
-                  value={maxSymbolsInput}
-                  onChange={(e) => setMaxSymbolsInput(Math.max(1, Number(e.target.value) || 1))}
+                  value={maxSymbolsField.rawText}
+                  onChange={maxSymbolsField.onChange}
+                  onBlur={maxSymbolsField.onBlur}
                   placeholder="e.g. 75"
                   className={inputClass}
                 />
@@ -647,8 +664,9 @@ const SettingsPage = () => {
               <input
                 type="number"
                 min={1}
-                value={workerPollInterval}
-                onChange={(e) => setWorkerPollInterval(Number(e.target.value) || 15)}
+                value={pollIntervalField.rawText}
+                onChange={pollIntervalField.onChange}
+                onBlur={pollIntervalField.onBlur}
                 className={inputClass}
               />
             </div>
@@ -657,8 +675,9 @@ const SettingsPage = () => {
               <input
                 type="number"
                 min={1}
-                value={workerBatchSize}
-                onChange={(e) => setWorkerBatchSize(Number(e.target.value) || 50)}
+                value={batchSizeField.rawText}
+                onChange={batchSizeField.onChange}
+                onBlur={batchSizeField.onBlur}
                 className={inputClass}
               />
             </div>
