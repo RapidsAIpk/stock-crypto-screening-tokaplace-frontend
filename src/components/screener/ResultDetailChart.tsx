@@ -14,17 +14,21 @@ import {
 } from "lightweight-charts";
 import type { FilterDetail, IndicatorDetail, MarketCandle } from "@/types/screener";
 import {
+  CHANNEL_RESPECT_HIGHLIGHT_COLOR,
+  CONFLUENCE_SOURCE_COLORS,
   createLinearRegressionCandles,
+  LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
   normalizeConfluenceChartSources,
   normalizeLrcChannel,
   normalizeMarketCandles,
   normalizeRegressionChannel,
   normalizeTrendChannel,
   regressionValueAt,
-  resolveConfluenceHighlightTimes,
-  resolveChannelRespectHighlightTimes,
+  resolveChannelRespectCandleReasons,
   resolveChartChannelVisibility,
+  resolveConfluenceCandleReasons,
   trendValueAt,
+  type CandleMatchReason,
   type ChartCandle,
   type ConfluenceChartSource,
   type LinRegSettings,
@@ -55,14 +59,18 @@ interface Props {
   provider?: string | null;
 }
 
+interface CandleTooltipState {
+  x: number;
+  y: number;
+  time: number;
+  reasons: CandleMatchReason[];
+}
 
 const TV_GRID = "#24282f";
 const TV_TEXT = "#b2b5be";
 const TV_BORDER = "#2a2e39";
 const UP_COLOR = "#089981";
 const DOWN_COLOR = "#f23645";
-const FILTER_CANDLE_OUTLINE = "#00e5ff";
-const CONFLUENCE_SOURCE_COLORS = ["#a78bfa", "#f59e0b"] as const;
 
 function confluenceValueAt(
   source: ConfluenceChartSource,
@@ -137,16 +145,19 @@ function linRegSettings(indicator: IndicatorDetail): LinRegSettings {
 
 function toCandleData(
   candles: ChartCandle[],
-  highlightedTimes: Set<number> = new Set(),
+  candleReasons: Map<number, CandleMatchReason[]> = new Map(),
 ): CandlestickData<UTCTimestamp>[] {
-  return candles.map((candle) => ({
-    time: candle.time as UTCTimestamp,
-    open: candle.open,
-    high: candle.high,
-    low: candle.low,
-    close: candle.close,
-    ...(highlightedTimes.has(candle.time) ? { borderColor: FILTER_CANDLE_OUTLINE } : {}),
-  }));
+  return candles.map((candle) => {
+    const reasons = candleReasons.get(candle.time);
+    return {
+      time: candle.time as UTCTimestamp,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      ...(reasons?.length ? { borderColor: reasons[0].color } : {}),
+    };
+  });
 }
 
 export function ResultDetailChart({
@@ -224,6 +235,7 @@ export function ResultDetailChart({
   );
   const [range, setRange] = useState<RangeOption>(100);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
+  const [candleTooltip, setCandleTooltip] = useState<CandleTooltipState | null>(null);
 
   useEffect(() => {
     const modeAvailable = (
@@ -248,17 +260,17 @@ export function ResultDetailChart({
   const source: ChartCandle[] = mode === "linreg" && linRegIndicator
     ? linRegCandles
     : completedCandles;
-  const channelRespectHighlightTimes = useMemo(
-    () => resolveChannelRespectHighlightTimes(filterDetails, requestFilters, mode),
+  const channelRespectCandleReasons = useMemo(
+    () => resolveChannelRespectCandleReasons(filterDetails, requestFilters, mode),
     [filterDetails, mode, requestFilters],
   );
-  const confluenceHighlightTimes = useMemo(
-    () => resolveConfluenceHighlightTimes(filterDetails),
-    [filterDetails],
+  const confluenceCandleReasons = useMemo(
+    () => resolveConfluenceCandleReasons(filterDetails, confluenceSources),
+    [confluenceSources, filterDetails],
   );
-  const highlightedTimes = mode === "confluence"
-    ? confluenceHighlightTimes
-    : channelRespectHighlightTimes;
+  const candleReasons = mode === "confluence"
+    ? confluenceCandleReasons
+    : channelRespectCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
@@ -404,7 +416,7 @@ export function ResultDetailChart({
       priceLineColor: DOWN_COLOR,
       lastValueVisible: true,
     });
-    candleSeries.setData(toCandleData(source, highlightedTimes));
+    candleSeries.setData(toCandleData(source, candleReasons));
 
     const addLine = (
       color: string,
@@ -506,7 +518,15 @@ export function ResultDetailChart({
     };
 
     chart.subscribeCrosshairMove((parameter) => {
-      setHoveredTime(parameter.time === undefined ? null : unixTime(parameter.time));
+      const time = parameter.time === undefined ? null : unixTime(parameter.time);
+      setHoveredTime(time);
+
+      const reasons = time === null ? undefined : candleReasons.get(time);
+      if (time !== null && reasons?.length && parameter.point) {
+        setCandleTooltip({ x: parameter.point.x, y: parameter.point.y, time, reasons });
+      } else {
+        setCandleTooltip(null);
+      }
     });
 
     const observer = new ResizeObserver((entries) => {
@@ -519,8 +539,9 @@ export function ResultDetailChart({
       observer.disconnect();
       resetViewRef.current = () => undefined;
       chart.remove();
+      setCandleTooltip(null);
     };
-  }, [confluenceSources, highlightedTimes, lrcChannel, mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
+  }, [candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, source, timeZone, timeframe, trendChannel]);
 
   if (!completedCandles.length) {
     return (
@@ -704,21 +725,66 @@ export function ResultDetailChart({
         ) : null}
       </div>
 
-      <div
-        ref={chartHostRef}
-        data-testid="trading-chart-canvas"
-        className="h-[560px] w-full bg-[#0b0e11]"
-      />
+      <div className="relative">
+        <div
+          ref={chartHostRef}
+          data-testid="trading-chart-canvas"
+          className="h-[560px] w-full bg-[#0b0e11]"
+        />
+
+        {candleTooltip ? (
+          <div
+            className="pointer-events-none absolute z-20 max-w-xs rounded-md border border-[#2a2e39] bg-[#151922]/95 px-3 py-2 text-[11px] shadow-xl"
+            style={{
+              left: Math.min(candleTooltip.x + 14, Math.max(0, (chartHostRef.current?.clientWidth ?? 0) - 260)),
+              top: Math.max(0, candleTooltip.y - 8),
+            }}
+          >
+            <div className="mb-1 text-[10px] text-[#787b86]">{formatTime(candleTooltip.time, timeZone)}</div>
+            <div className="space-y-1.5">
+              {candleTooltip.reasons.map((reason, index) => (
+                <div key={`${reason.label}-${index}`} className="flex items-start gap-1.5">
+                  <span
+                    className="mt-0.5 h-2.5 w-2.5 flex-none rounded-sm border-2"
+                    style={{ borderColor: reason.color }}
+                  />
+                  <div>
+                    <div className="font-semibold text-white">{reason.label}</div>
+                    <div className="text-[#b2b5be]">{reason.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
         <span>
-          Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset
+          Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset · hover an outlined candle for why it matched
         </span>
         <div className="flex flex-wrap items-center gap-3">
-          {highlightedTimes.size ? (
+          {mode === "confluence" && candleReasons.size ? (
+            <>
+              {confluenceSources.map((confluenceSource, index) => (
+                <span key={confluenceSource.sourceId} className="flex items-center gap-1.5 text-[#9ca3af]">
+                  <span
+                    className="h-2.5 w-2.5 border-2"
+                    style={{ borderColor: CONFLUENCE_SOURCE_COLORS[index] ?? CONFLUENCE_SOURCE_COLORS[0] }}
+                  />
+                  Source {index + 1} match
+                </span>
+              ))}
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: LIQUIDITY_SWEEP_HIGHLIGHT_COLOR }} />
+                Liquidity sweep
+              </span>
+            </>
+          ) : null}
+          {mode !== "confluence" && candleReasons.size ? (
             <span className="flex items-center gap-1.5 text-[#9ca3af]">
-              <span className="h-2.5 w-2.5 border-2 border-[#00e5ff]" />
-              Cyan outline = candle matched by {mode === "confluence" ? "Confluence" : "Channel Respect"}
+              <span className="h-2.5 w-2.5 border-2" style={{ borderColor: CHANNEL_RESPECT_HIGHLIGHT_COLOR }} />
+              Channel Respect match
             </span>
           ) : null}
           <span>{timeZone} · completed bars only · {source.length} bars</span>
