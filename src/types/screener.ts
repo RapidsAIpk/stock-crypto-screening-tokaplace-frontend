@@ -79,6 +79,8 @@ export interface ChannelRespect {
   touch_type?: "wick" | "body" | "both";
 }
 
+export type ConfluenceLineRelation = "close_above" | "close_below" | "none";
+
 export interface ConfluenceSource {
   id: string;
   channel_type: ChannelType;
@@ -89,6 +91,12 @@ export interface ConfluenceSource {
   lower_dev?: number | null;
   window_type?: "continuous" | "interval" | null;
   interval_step?: number | null;
+  // Optional sub-filter: require price to close above/below a specific
+  // line of this source (which may differ from `selection`).
+  line_relation?: ConfluenceLineRelation | null;
+  target_line?: ConfluenceSelection | null;
+  candles_since_close_min?: number | null;
+  candles_since_close_max?: number | null;
 }
 
 export interface Confluence {
@@ -98,6 +106,9 @@ export interface Confluence {
   liquidity_sweep: boolean;
   lookback_candles: number;
   tolerance_pct: number;
+  // Client issue #4: require price to have closed back near the first
+  // source's line after it breaks and the second source holds support.
+  reclose_to_first_line?: boolean;
 }
 
 export interface PriceRange {
@@ -1644,6 +1655,7 @@ const CONFLUENCE_DEFAULT_CONFIG = {
   liquidity_sweep: false,
   lookback_candles: 4,
   tolerance_pct: 0.1,
+  reclose_to_first_line: false,
 };
 
 function readPostFilterOverrides(key: "channel_respect" | "confluence"): Record<string, unknown> {
@@ -2173,6 +2185,16 @@ export function createConfluenceSource(
       overrides.interval_step == null
         ? null
         : Math.max(1, Number(overrides.interval_step) || 1),
+    line_relation: overrides.line_relation ?? "none",
+    target_line: overrides.target_line ?? null,
+    candles_since_close_min:
+      overrides.candles_since_close_min == null
+        ? null
+        : Math.max(0, Number(overrides.candles_since_close_min) || 0),
+    candles_since_close_max:
+      overrides.candles_since_close_max == null
+        ? null
+        : Math.max(0, Number(overrides.candles_since_close_max) || 0),
   };
 }
 
@@ -2227,13 +2249,11 @@ export function normalizeConfluenceConfig(confluence: Confluence | null): Conflu
     sources,
     channels: sources.map((source) => source.channel_type),
     liquidity_sweep: Boolean(confluence.liquidity_sweep),
-    lookback_candles: Math.min(
-      4,
-      Math.max(1, Number(confluence.lookback_candles) || 4),
-    ),
+    lookback_candles: Math.max(1, Number(confluence.lookback_candles) || 4),
     tolerance_pct: Number.isFinite(Number(confluence.tolerance_pct))
       ? Number(confluence.tolerance_pct)
       : 0.1,
+    reclose_to_first_line: Boolean(confluence.reclose_to_first_line),
   };
 }
 
