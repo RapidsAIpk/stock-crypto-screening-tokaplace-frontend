@@ -41,6 +41,12 @@ import {
 
 type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg";
 type RangeOption = 20 | 50 | 100 | "all";
+type TrendyAdxPoint = {
+  time: number;
+  plusDi: number | null;
+  minusDi: number | null;
+  adx: number | null;
+};
 
 interface Props {
   candles: Array<MarketCandle | Record<string, unknown>>;
@@ -63,6 +69,10 @@ const UP_COLOR = "#089981";
 const DOWN_COLOR = "#f23645";
 const FILTER_CANDLE_OUTLINE = "#00e5ff";
 const CONFLUENCE_SOURCE_COLORS = ["#a78bfa", "#f59e0b"] as const;
+const ADX_PLUS_COLOR = "#ff00ff";
+const ADX_MINUS_COLOR = "#004cff";
+const ADX_STRENGTH_COLOR = "#facc15";
+const ADX_THRESHOLD_COLOR = "#d8d800";
 
 function confluenceValueAt(
   source: ConfluenceChartSource,
@@ -85,6 +95,87 @@ function compactVolume(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`;
   return value.toFixed(0);
+}
+
+function finiteIndicatorValue(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function createTrendyAdxPoints(candles: ChartCandle[], length: number): TrendyAdxPoint[] {
+  if (candles.length === 0) return [];
+
+  const plusDi: Array<number | null> = Array(candles.length).fill(null);
+  const minusDi: Array<number | null> = Array(candles.length).fill(null);
+  const adx: Array<number | null> = Array(candles.length).fill(null);
+  const trueRanges = Array(candles.length).fill(0);
+  const plusDm = Array(candles.length).fill(0);
+  const minusDm = Array(candles.length).fill(0);
+
+  for (let index = 1; index < candles.length; index += 1) {
+    const candle = candles[index];
+    const previous = candles[index - 1];
+    trueRanges[index] = Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previous.close),
+      Math.abs(candle.low - previous.close),
+    );
+
+    const upMove = candle.high - previous.high;
+    const downMove = previous.low - candle.low;
+    plusDm[index] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDm[index] = downMove > upMove && downMove > 0 ? downMove : 0;
+  }
+
+  let smoothedTr = 0;
+  let smoothedPlus = 0;
+  let smoothedMinus = 0;
+  const dx: Array<number | null> = Array(candles.length).fill(null);
+
+  for (let index = 1; index < candles.length; index += 1) {
+    if (index <= length) {
+      smoothedTr += trueRanges[index];
+      smoothedPlus += plusDm[index];
+      smoothedMinus += minusDm[index];
+    } else {
+      smoothedTr = smoothedTr - (smoothedTr / length) + trueRanges[index];
+      smoothedPlus = smoothedPlus - (smoothedPlus / length) + plusDm[index];
+      smoothedMinus = smoothedMinus - (smoothedMinus / length) + minusDm[index];
+    }
+
+    if (index >= length && smoothedTr > 0) {
+      const plus = (100 * smoothedPlus) / smoothedTr;
+      const minus = (100 * smoothedMinus) / smoothedTr;
+      plusDi[index] = plus;
+      minusDi[index] = minus;
+      dx[index] = plus + minus === 0 ? 0 : (100 * Math.abs(plus - minus)) / (plus + minus);
+    }
+  }
+
+  let adxSeed = 0;
+  let adxSeedCount = 0;
+  for (let index = length; index < candles.length; index += 1) {
+    const dxValue = dx[index];
+    if (dxValue === null) continue;
+    if (adxSeedCount < length) {
+      adxSeed += dxValue;
+      adxSeedCount += 1;
+      if (adxSeedCount === length) {
+        adx[index] = adxSeed / length;
+      }
+      continue;
+    }
+
+    const previousAdx = adx[index - 1];
+    adx[index] = previousAdx === null ? dxValue : ((previousAdx * (length - 1)) + dxValue) / length;
+  }
+
+  return candles.map((candle, index) => ({
+    time: candle.time,
+    plusDi: plusDi[index],
+    minusDi: minusDi[index],
+    adx: adx[index],
+  }));
 }
 
 function decimalPlaces(value: number): number {
@@ -149,6 +240,117 @@ function toCandleData(
   }));
 }
 
+function TrendyAdxPane({
+  points,
+  threshold,
+  topLevel,
+}: {
+  points: TrendyAdxPoint[];
+  threshold: number;
+  topLevel: number;
+}) {
+  const height = 170;
+  const width = Math.max(2, points.length - 1);
+  const values = points.flatMap((point) => [point.plusDi, point.minusDi, point.adx])
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const maxValue = Math.max(50, threshold, topLevel, ...values);
+  const yForValue = (value: number) => height - 18 - ((value / maxValue) * (height - 32));
+  const xForIndex = (index: number) => points.length <= 1 ? 0 : (index / (points.length - 1)) * width;
+  const pathFor = (key: keyof Pick<TrendyAdxPoint, "plusDi" | "minusDi" | "adx">) => {
+    let started = false;
+    return points.reduce((path, point, index) => {
+      const value = point[key];
+      if (value === null) {
+        started = false;
+        return path;
+      }
+      const command = started ? "L" : "M";
+      started = true;
+      return `${path} ${command}${xForIndex(index).toFixed(3)},${yForValue(value).toFixed(3)}`;
+    }, "").trim();
+  };
+  const latest = [...points].reverse().find((point) => (
+    point.plusDi !== null || point.minusDi !== null || point.adx !== null
+  ));
+  const thresholdY = yForValue(threshold);
+
+  return (
+    <div className="border-t border-[#2a2e39] bg-[#0b0e11]">
+      <div className="relative h-[170px] overflow-hidden">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="none"
+          className="absolute inset-0 h-full w-full"
+          aria-label="Trendy ADX DI plus DI minus trend pane"
+        >
+          {points.map((point, index) => {
+            const plus = point.plusDi ?? 0;
+            const minus = point.minusDi ?? 0;
+            const adx = point.adx ?? 0;
+            const strongTrend = adx >= threshold;
+            const color = plus >= minus ? "#008000" : "#b00000";
+            const opacity = strongTrend ? 0.72 : 0.42;
+            return (
+              <rect
+                key={point.time}
+                x={xForIndex(index)}
+                y={0}
+                width={Math.max(1, width / Math.max(1, points.length - 1))}
+                height={height}
+                fill={color}
+                opacity={opacity}
+              />
+            );
+          })}
+          {[0.25, 0.5, 0.75].map((ratio) => (
+            <line
+              key={ratio}
+              x1={0}
+              x2={width}
+              y1={height * ratio}
+              y2={height * ratio}
+              stroke="#24282f"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          <line
+            x1={0}
+            x2={width}
+            y1={thresholdY}
+            y2={thresholdY}
+            stroke={ADX_THRESHOLD_COLOR}
+            strokeDasharray="5 5"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <path d={pathFor("plusDi")} fill="none" stroke={ADX_PLUS_COLOR} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+          <path d={pathFor("minusDi")} fill="none" stroke={ADX_MINUS_COLOR} strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+          <path d={pathFor("adx")} fill="none" stroke={ADX_STRENGTH_COLOR} strokeWidth={3} vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
+          <span>Trendy ADX</span>
+          {latest?.adx != null ? <span style={{ color: ADX_STRENGTH_COLOR }}>{latest.adx.toFixed(3)}</span> : null}
+          {latest?.minusDi != null ? <span style={{ color: ADX_MINUS_COLOR }}>{latest.minusDi.toFixed(3)}</span> : null}
+          {latest?.plusDi != null ? <span style={{ color: ADX_PLUS_COLOR }}>{latest.plusDi.toFixed(3)}</span> : null}
+        </div>
+        <div className="absolute right-2 top-4 space-y-2 font-mono text-xs font-bold">
+          {latest?.adx != null ? (
+            <div className="bg-[#111317] px-2 py-1" style={{ color: ADX_STRENGTH_COLOR }}>{latest.adx.toFixed(3)}</div>
+          ) : null}
+          {latest?.minusDi != null ? (
+            <div className="px-2 py-1 text-white" style={{ backgroundColor: ADX_MINUS_COLOR }}>{latest.minusDi.toFixed(3)}</div>
+          ) : null}
+          {latest?.plusDi != null ? (
+            <div className="px-2 py-1 text-white" style={{ backgroundColor: ADX_PLUS_COLOR }}>{latest.plusDi.toFixed(3)}</div>
+          ) : null}
+          <div className="bg-[#787b86] px-2 py-1 text-white">{threshold.toFixed(3)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ResultDetailChart({
   candles: rawCandles,
   indicatorDetails,
@@ -178,6 +380,7 @@ export function ResultDetailChart({
   );
   const showConfluenceChart = confluenceSources.length === 2;
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
+  const adxIndicator = indicatorDetails.find((item) => item.name === "adx");
   const channelVisibility = useMemo(
     () => resolveChartChannelVisibility(indicatorDetails, requestFilters),
     [indicatorDetails, requestFilters],
@@ -192,6 +395,13 @@ export function ResultDetailChart({
   const linRegCandles = useMemo(
     () => createLinearRegressionCandles(completedCandles, settings),
     [completedCandles, settings],
+  );
+  const adxLength = positiveInteger(adxIndicator?.config.length, 11);
+  const adxThreshold = finiteIndicatorValue(adxIndicator?.config.threshold, 20);
+  const adxTopLevel = finiteIndicatorValue(adxIndicator?.config.top_level, 19);
+  const adxPoints = useMemo(
+    () => createTrendyAdxPoints(completedCandles, adxLength),
+    [adxLength, completedCandles],
   );
   const requestedChannelType = String(
     (requestFilters?.channel_respect as Record<string, unknown> | undefined)?.channel_type || "",
@@ -260,6 +470,10 @@ export function ResultDetailChart({
     ? confluenceHighlightTimes
     : channelRespectHighlightTimes;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
+  const visibleAdxPoints = useMemo(() => {
+    if (range === "all") return adxPoints;
+    return adxPoints.slice(-range);
+  }, [adxPoints, range]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
     const index = source.findIndex((candle) => candle.time === hoveredTime);
@@ -709,6 +923,14 @@ export function ResultDetailChart({
         data-testid="trading-chart-canvas"
         className="h-[560px] w-full bg-[#0b0e11]"
       />
+
+      {adxIndicator && visibleAdxPoints.some((point) => point.plusDi !== null || point.minusDi !== null || point.adx !== null) ? (
+        <TrendyAdxPane
+          points={visibleAdxPoints}
+          threshold={adxThreshold}
+          topLevel={adxTopLevel}
+        />
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
         <span>
