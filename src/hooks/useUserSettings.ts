@@ -58,7 +58,6 @@ export interface PostFilterDefaults {
 
 export interface UserSettings {
   apiKey: string;
-  adminApiToken: string;
   apiBaseOverride: string;
   apiTimeoutMs: number;
   apiRetries: number;
@@ -75,7 +74,6 @@ export interface UserSettings {
 
 const DEFAULT_SETTINGS: UserSettings = {
   apiKey: "",
-  adminApiToken: "",
   apiBaseOverride: "",
   apiTimeoutMs: 600000,
   apiRetries: 0,

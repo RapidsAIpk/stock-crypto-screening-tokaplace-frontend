@@ -120,7 +120,6 @@ const SettingsPage = () => {
   const { settings, loading, saveSettings } = useUserSettings();
 
   const [apiBaseOverride, setApiBaseOverride] = useState(settings.apiBaseOverride ?? "");
-  const [adminApiToken, setAdminApiToken] = useState(settings.adminApiToken ?? "");
   const [apiTimeoutMs, setApiTimeoutMs] = useState(settings.apiTimeoutMs ?? 48000);
   const [apiRetries, setApiRetries] = useState(settings.apiRetries ?? 0);
   const [workerPollInterval, setWorkerPollInterval] = useState(settings.workerPollInterval ?? 15);
@@ -169,7 +168,6 @@ const SettingsPage = () => {
     }
 
     setApiBaseOverride(settings.apiBaseOverride ?? "");
-    setAdminApiToken(settings.adminApiToken ?? "");
     setApiTimeoutMs(settings.apiTimeoutMs ?? 48000);
     setApiRetries(settings.apiRetries ?? 0);
     setWorkerPollInterval(settings.workerPollInterval ?? 15);
@@ -202,7 +200,6 @@ const SettingsPage = () => {
   const apiRoot = useMemo(() => runtimeApiBase.replace(/\/screen$/, ""), [runtimeApiBase]);
 
   const persistRuntimeControls = (next: {
-    adminApiToken: string;
     apiBaseOverride: string;
     apiTimeoutMs: number;
     apiRetries: number;
@@ -211,7 +208,6 @@ const SettingsPage = () => {
     screeningMaxSymbols: number;
     indicatorDefaults: Record<string, Record<string, unknown>>;
   }) => {
-    localStorage.setItem("screener.adminApiToken", next.adminApiToken.trim());
     localStorage.setItem("screener.apiBaseOverride", next.apiBaseOverride.trim());
     localStorage.setItem("screener.apiTimeoutMs", String(next.apiTimeoutMs));
     localStorage.setItem("screener.apiRetries", String(next.apiRetries));
@@ -227,7 +223,7 @@ const SettingsPage = () => {
     try {
       const response = await fetch(`${runtimeApiBase}/ops/screening/config`, {
         method: "POST",
-        headers: adminHeaders(),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ screening_max_symbols: effectiveVal }),
       });
       const data = await response.json();
@@ -251,11 +247,6 @@ const SettingsPage = () => {
     }
   };
 
-  const adminHeaders = () => ({
-    "X-Admin-Token": adminApiToken.trim(),
-    "Content-Type": "application/json",
-  });
-
   const callWorkerOps = async (
     path: string,
     options?: RequestInit,
@@ -264,7 +255,7 @@ const SettingsPage = () => {
       method: "POST",
       ...options,
       headers: {
-        ...adminHeaders(),
+        "Content-Type": "application/json",
         ...(options?.headers ?? {}),
       },
     });
@@ -294,7 +285,6 @@ const SettingsPage = () => {
       try {
         const workerRes = await fetch(`${runtimeApiBase}/ops/worker`, {
           method: "GET",
-          headers: adminHeaders(),
         });
         if (workerRes.ok) {
           setWorkerOps((await workerRes.json()) as WorkerOpsPayload);
@@ -305,7 +295,6 @@ const SettingsPage = () => {
       try {
         const runtimeRes = await fetch(`${runtimeApiBase}/ops/runtime-settings`, {
           method: "GET",
-          headers: adminHeaders(),
         });
         if (runtimeRes.ok) {
           setRuntimeSettings((await runtimeRes.json()) as RuntimeSettingsPayload);
@@ -357,7 +346,6 @@ const SettingsPage = () => {
     const effectiveMaxSymbols = capEnabled ? Math.max(1, Number(maxSymbolsInput) || 75) : 0;
 
     const payload = {
-      adminApiToken: adminApiToken.trim(),
       apiBaseOverride: apiBaseOverride.trim(),
       apiTimeoutMs: sanitizedTimeout,
       apiRetries: sanitizedRetries,
@@ -536,17 +524,6 @@ const SettingsPage = () => {
         </SettingsCard>
 
         <SettingsCard title="API Control">
-          <div className="space-y-1.5">
-            <FieldLabel info="Required only if backend ADMIN_API_TOKEN is configured. Sent as X-Admin-Token for protected ops.">
-              Admin API Token
-            </FieldLabel>
-            <input
-              value={adminApiToken}
-              onChange={(e) => setAdminApiToken(e.target.value)}
-              placeholder="X-Admin-Token"
-              className={inputClass}
-            />
-          </div>
           <div className="space-y-1.5">
             <FieldLabel info="Point the UI to another backend environment without changing .env.">
               API Base Override
