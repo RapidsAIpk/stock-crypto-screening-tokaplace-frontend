@@ -80,7 +80,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   workerPollInterval: 15,
   workerBatchSize: 50,
   screeningMaxSymbols: 75,
-  timezone: "UTC",
+  timezone: "America/New_York",
   indicatorDefaults: {},
   presets: [],
   watchlist: [],
