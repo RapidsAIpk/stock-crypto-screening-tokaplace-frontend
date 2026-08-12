@@ -4,9 +4,11 @@ import { useUserSettings } from "@/hooks/useUserSettings";
 import { formatClockTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
+const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
 export function AppClock({ className }: { className?: string }) {
   const { settings } = useUserSettings();
-  const timeZone = settings.timezone || "UTC";
+  const timeZone = settings.nyTimeOverride ? "America/New_York" : LOCAL_TIME_ZONE;
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {

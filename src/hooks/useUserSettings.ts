@@ -65,6 +65,7 @@ export interface UserSettings {
   workerBatchSize: number;
   screeningMaxSymbols: number;
   timezone: string;
+  nyTimeOverride: boolean;
   indicatorDefaults: Record<string, Record<string, unknown>>;
   presets: FilterPreset[];
   watchlist: WatchlistEntry[];
@@ -81,6 +82,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   workerBatchSize: 50,
   screeningMaxSymbols: 75,
   timezone: "America/New_York",
+  nyTimeOverride: false,
   indicatorDefaults: {},
   presets: [],
   watchlist: [],

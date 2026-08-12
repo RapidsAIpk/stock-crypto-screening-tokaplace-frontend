@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Activity, Lock, LogOut, Play, RotateCcw, Save, Square } from "lucide-react";
+import { Activity, KeyRound, Lock, LogOut, Play, RotateCcw, Save, Square } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUserSettings } from "@/hooks/useUserSettings";
+import { useProviderKeys, type ProviderName } from "@/hooks/useProviderKeys";
 import { useDeferredNumberField } from "@/hooks/useDeferredNumberField";
 import { toast } from "sonner";
 import { appEnv } from "@/config/env";
@@ -25,7 +26,7 @@ function SettingsCard({
   return (
     <section
       className={cn(
-        "flex h-full flex-col rounded-lg border border-border bg-card p-5",
+        "flex flex-col rounded-lg border border-border bg-card p-5",
         className,
       )}
     >
@@ -115,9 +116,70 @@ function toInternalIndicatorDefaults(
   return next;
 }
 
+function ProviderKeyRow({
+  provider,
+  label,
+  status,
+  testing,
+  onSave,
+  onTest,
+}: {
+  provider: ProviderName;
+  label: string;
+  status: { configured: boolean; last4: string | null };
+  testing: boolean;
+  onSave: (provider: ProviderName, apiKey: string) => void;
+  onTest: (provider: ProviderName) => void;
+}) {
+  const [value, setValue] = useState("");
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-border/70 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel>{label}</FieldLabel>
+        <span className="text-xs text-muted-foreground font-mono">
+          {status.configured ? `Saved •••• ${status.last4 ?? ""}` : "Not configured"}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={status.configured ? "Enter a new key to replace it" : "Paste API key"}
+          autoComplete="off"
+          className="w-full min-w-0 rounded-md border border-border bg-secondary/40 px-3 py-2.5 text-sm"
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              if (!value.trim()) return;
+              onSave(provider, value.trim());
+              setValue("");
+            }}
+            disabled={!value.trim()}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-secondary/60 disabled:opacity-50 sm:flex-none"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => onTest(provider)}
+            disabled={testing || !status.configured}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2 text-sm hover:bg-secondary/60 disabled:opacity-50 sm:flex-none"
+          >
+            <RotateCcw className={`h-4 w-4 ${testing ? "animate-spin" : ""}`} />
+            Test
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const SettingsPage = () => {
   const { user, logout, resetPassword } = useAuth();
   const { settings, loading, saveSettings } = useUserSettings();
+  const { status: providerKeyStatus, testing: providerKeyTesting, saveKey, testKey } = useProviderKeys();
 
   const [apiBaseOverride, setApiBaseOverride] = useState(settings.apiBaseOverride ?? "");
   const [apiTimeoutMs, setApiTimeoutMs] = useState(settings.apiTimeoutMs ?? 48000);
@@ -493,7 +555,7 @@ const SettingsPage = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="columns-1 gap-4 md:columns-2 xl:columns-3 [&>*]:mb-4 [&>*]:break-inside-avoid">
         <SettingsCard title="Site Health" icon={<Activity className="h-4 w-4 text-primary" />}>
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground truncate" title={apiRoot}>Source: {apiRoot}</p>
@@ -664,7 +726,7 @@ const SettingsPage = () => {
           </button>
         </SettingsCard>
 
-        <SettingsCard title="Server Runtime" className="md:col-span-2 xl:col-span-1">
+        <SettingsCard title="Server Runtime">
           <p className="text-sm text-muted-foreground">Live server-side effective configuration.</p>
           <div className={jsonPanelClass}>
             {runtimeSettings
@@ -673,7 +735,7 @@ const SettingsPage = () => {
           </div>
         </SettingsCard>
 
-        <SettingsCard title="Indicator Defaults" className="md:col-span-2 xl:col-span-2">
+        <SettingsCard title="Indicator Defaults">
           <div className="space-y-1.5">
             <FieldLabel info="Per-indicator thresholds, lengths, and lookback periods used as defaults when adding an indicator.">
               Default Parameters (JSON)
@@ -688,27 +750,61 @@ const SettingsPage = () => {
           </div>
         </SettingsCard>
 
-        <SettingsCard
-          title="Reset Password"
-          icon={<Lock className="h-4 w-4 text-primary" />}
-          className="md:col-span-1"
-        >
-          <button
-            onClick={handleResetPassword}
-            className="px-4 py-2.5 rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
-          >
-            Send Reset Link
-          </button>
+        <SettingsCard title="API Keys" icon={<KeyRound className="h-4 w-4 text-primary" />}>
+          <p className="text-xs text-muted-foreground">
+            Keys are write-only: once saved, they are never sent back to this page. Use Test to
+            confirm a saved key is working.
+          </p>
+          <ProviderKeyRow
+            provider="massive"
+            label="Massive (market data)"
+            status={providerKeyStatus.massive}
+            testing={!!providerKeyTesting.massive}
+            onSave={saveKey}
+            onTest={testKey}
+          />
+          <ProviderKeyRow
+            provider="zoya"
+            label="Zoya (Sharia compliance)"
+            status={providerKeyStatus.zoya}
+            testing={!!providerKeyTesting.zoya}
+            onSave={saveKey}
+            onTest={testKey}
+          />
         </SettingsCard>
 
-        <SettingsCard title="Account" className="md:col-span-1 flex justify-center">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            Logout
-          </button>
+        <SettingsCard title="Preferences & Account">
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border/70 p-3">
+            <div>
+              <FieldLabel info="When on, the app clock always shows New York (market) time. When off, it shows your device's local time.">
+                New York Time Override
+              </FieldLabel>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {settings.nyTimeOverride ? "Showing New York time" : "Showing your local time"}
+              </p>
+            </div>
+            <Switch
+              checked={settings.nyTimeOverride}
+              onCheckedChange={(checked) => saveSettings({ nyTimeOverride: checked })}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              onClick={handleResetPassword}
+              className="flex flex-1 items-center justify-center gap-2 rounded-md bg-secondary px-4 py-2.5 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+            >
+              <Lock className="h-4 w-4" />
+              Send Reset Link
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex flex-1 items-center justify-center gap-2 rounded-md bg-destructive/10 px-4 py-2.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </button>
+          </div>
         </SettingsCard>
       </div>
     </div>
