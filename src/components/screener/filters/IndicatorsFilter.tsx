@@ -14,6 +14,8 @@ import {
   TREND_CHANNEL_DISABLED,
   TREND_CHANNEL_LINE_ACTIONS,
   TREND_CHANNEL_ZONE_ACTIONS,
+  isPhase2ChannelAction,
+  isReclaimChannelAction,
   isTrendAreaRuleDisabled,
   getDefaultIndicatorConfig,
   isChannelLineIndicatorFieldHidden,
@@ -90,6 +92,11 @@ const FIELD_HELP_TEXT: Record<string, string> = {
   lin_reg: "On = use smoothed LinReg candles (TV default). Off = use normal price candles.",
   price_position: "Where the LinReg candle sits vs the white signal line.",
   close_location: "Optional extra check on LinReg close. “Any” skips this check.",
+  selection_mode: "How selected channel lines or area rules are combined.",
+  candles_since_min: "Earliest matching candle age allowed for the selected Phase 2 action.",
+  candles_since_max: "Oldest matching candle age allowed for the selected Phase 2 action.",
+  min_consecutive_below: "Minimum consecutive candles below the channel before a reclaim can pass.",
+  require_still_above_now: "Requires price to still be above the reclaimed line now.",
 };
 
 const RELATIVE_VOLUME_FIELD_HELP_TEXT: Record<string, string> = {
@@ -163,6 +170,14 @@ function trendAreaRuleUsesTouchType(area: AreaRule): boolean {
 
 function trendAreaRuleUsesBreachControls(area: AreaRule): boolean {
   return normalizedTrendAction(area) === "breach";
+}
+
+function trendAreaRuleUsesPhase2Range(area: AreaRule): boolean {
+  return isPhase2ChannelAction(normalizedTrendAction(area));
+}
+
+function trendAreaRuleUsesReclaimFields(area: AreaRule): boolean {
+  return isReclaimChannelAction(normalizedTrendAction(area));
 }
 
 function trendAreaRuleHasConfirmationCriteria(area: AreaRule): boolean {
@@ -603,6 +618,21 @@ export function IndicatorsFilter({
                                 });
                                 return;
                               }
+                              if ((ind.name === "lrc" || ind.name === "regression") && field.key === "action") {
+                                const nextAction = e.target.value || "touch";
+                                const patch: Record<string, unknown> = { action: nextAction };
+                                if (isPhase2ChannelAction(nextAction)) {
+                                  patch.candles_since_min = ind.config.candles_since_min ?? 0;
+                                  patch.candles_since_max = ind.config.candles_since_max ?? 5;
+                                  patch.window = ind.config.window ?? 1;
+                                }
+                                if (isReclaimChannelAction(nextAction)) {
+                                  patch.min_consecutive_below = ind.config.min_consecutive_below ?? 1;
+                                  patch.require_still_above_now = ind.config.require_still_above_now ?? true;
+                                }
+                                updateConfigPatch(idx, patch);
+                                return;
+                              }
                               updateConfig(idx, field.key, e.target.value || null);
                             }}
                             className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
@@ -659,6 +689,8 @@ export function IndicatorsFilter({
                               const areaAction = normalizedTrendAction(area);
                               const touchTypeActive = !disabledRule && trendAreaRuleUsesTouchType(area);
                               const breachControlsActive = !disabledRule && trendAreaRuleUsesBreachControls(area);
+                              const phase2RangeActive = !disabledRule && trendAreaRuleUsesPhase2Range(area);
+                              const reclaimFieldsActive = !disabledRule && trendAreaRuleUsesReclaimFields(area);
                               const confirmationActive = !disabledRule && Boolean(area.confirmation);
                               const confirmationCriteriaActive = confirmationActive;
                               const confirmationWindowActive = confirmationActive && trendAreaRuleHasConfirmationCriteria(area);
@@ -712,11 +744,23 @@ export function IndicatorsFilter({
                                           updateAreaRulePatch(idx, areaIdx, { action: TREND_CHANNEL_DISABLED });
                                           return;
                                         }
-                                        updateAreaRulePatch(idx, areaIdx, {
+                                        const patch: Partial<AreaRule> = {
                                           action: nextAction,
                                           area: area.area === TREND_CHANNEL_DISABLED
                                             ? "top_line"
                                             : area.area,
+                                        };
+                                        if (isPhase2ChannelAction(nextAction)) {
+                                          patch.candles_since_min = area.candles_since_min ?? 0;
+                                          patch.candles_since_max = area.candles_since_max ?? 5;
+                                          patch.window = area.window ?? 1;
+                                        }
+                                        if (isReclaimChannelAction(nextAction)) {
+                                          patch.min_consecutive_below = area.min_consecutive_below ?? 1;
+                                          patch.require_still_above_now = area.require_still_above_now ?? true;
+                                        }
+                                        updateAreaRulePatch(idx, areaIdx, {
+                                          ...patch,
                                         });
                                       }}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
@@ -788,20 +832,81 @@ export function IndicatorsFilter({
                                   )}
                                   {!disabledRule && (
                                   <>
-                                  <div className="space-y-1">
-                                    <div className="text-[10px] text-muted-foreground">Window</div>
-                                    <input
-                                      type="number"
-                                      value={(area.window as number | null) ?? ""}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "window", e.target.value === "" ? null : Number(e.target.value))}
-                                      onBlur={(e) => {
-                                        if (!e.target.value) {
-                                          updateAreaRule(idx, areaIdx, "window", 1);
-                                        }
-                                      }}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-                                    />
-                                  </div>
+                                  {!phase2RangeActive && (
+                                    <div className="space-y-1">
+                                      <div className="text-[10px] text-muted-foreground">Window</div>
+                                      <input
+                                        type="number"
+                                        value={(area.window as number | null) ?? ""}
+                                        onChange={(e) => updateAreaRule(idx, areaIdx, "window", e.target.value === "" ? null : Number(e.target.value))}
+                                        onBlur={(e) => {
+                                          if (!e.target.value) {
+                                            updateAreaRule(idx, areaIdx, "window", 1);
+                                          }
+                                        }}
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      />
+                                    </div>
+                                  )}
+                                  {phase2RangeActive && (
+                                    <>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Candles Since Min</div>
+                                        <input
+                                          type="number"
+                                          value={(area.candles_since_min as number | null) ?? ""}
+                                          onChange={(e) => updateAreaRule(idx, areaIdx, "candles_since_min", e.target.value === "" ? null : Number(e.target.value))}
+                                          onBlur={(e) => {
+                                            if (!e.target.value) {
+                                              updateAreaRule(idx, areaIdx, "candles_since_min", 0);
+                                            }
+                                          }}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Candles Since Max</div>
+                                        <input
+                                          type="number"
+                                          value={(area.candles_since_max as number | null) ?? ""}
+                                          onChange={(e) => updateAreaRule(idx, areaIdx, "candles_since_max", e.target.value === "" ? null : Number(e.target.value))}
+                                          onBlur={(e) => {
+                                            if (!e.target.value) {
+                                              updateAreaRule(idx, areaIdx, "candles_since_max", 5);
+                                            }
+                                          }}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        />
+                                      </div>
+                                    </>
+                                  )}
+                                  {reclaimFieldsActive && (
+                                    <>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Min Consecutive Below</div>
+                                        <input
+                                          type="number"
+                                          value={(area.min_consecutive_below as number | null) ?? ""}
+                                          onChange={(e) => updateAreaRule(idx, areaIdx, "min_consecutive_below", e.target.value === "" ? null : Number(e.target.value))}
+                                          onBlur={(e) => {
+                                            if (!e.target.value) {
+                                              updateAreaRule(idx, areaIdx, "min_consecutive_below", 1);
+                                            }
+                                          }}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Require Still Above Now</div>
+                                        <button
+                                          onClick={() => updateAreaRule(idx, areaIdx, "require_still_above_now", area.require_still_above_now === false)}
+                                          className={`h-7 w-7 rounded border transition-colors ${
+                                            area.require_still_above_now !== false ? "bg-primary border-primary" : "border-border"
+                                          }`}
+                                        />
+                                      </div>
+                                    </>
+                                  )}
                                   <div className="space-y-1">
                                     <div className="text-[10px] text-muted-foreground">Tolerance %</div>
                                     <input
