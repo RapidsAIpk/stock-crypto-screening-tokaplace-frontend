@@ -41,8 +41,8 @@ describe("normalizeConfluenceConfig", () => {
       type: "role_reversal",
       channels: ["trend", "lrc", "regression"],
       sources: [
-        { id: "trend_0", channel_type: "trend", length: 8 } as any,
-        { id: "lrc_1", channel_type: "lrc", length: 100 } as any,
+        { id: "trend_0", channel_type: "trend", length: 8 },
+        { id: "lrc_1", channel_type: "lrc", length: 100 },
         { id: "reg_2", channel_type: "regression", length: 200, selection: "upper" },
       ],
       liquidity_sweep: false,
@@ -57,3 +57,4 @@ describe("normalizeConfluenceConfig", () => {
     expect(config?.lookback_candles).toBe(9);
   });
 });
+
