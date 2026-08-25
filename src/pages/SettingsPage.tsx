@@ -755,6 +755,10 @@ const SettingsPage = () => {
             Keys are write-only: once saved, they are never sent back to this page. Use Test to
             confirm a saved key is working.
           </p>
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-500">
+            These are app-wide keys, not personal ones. Saving a Massive key here replaces the
+            key the entire site uses for every user's scans, immediately.
+          </p>
           <ProviderKeyRow
             provider="massive"
             label="Massive (market data)"
@@ -771,6 +775,11 @@ const SettingsPage = () => {
             onSave={saveKey}
             onTest={testKey}
           />
+          <p className="text-xs text-muted-foreground">
+            Note: the Zoya key saved here does not affect live scans. Zoya compliance data comes
+            from a periodically refreshed local file, updated by running a maintenance script
+            with this key by hand — it is stored here for reference/testing only.
+          </p>
         </SettingsCard>
 
         <SettingsCard title="Preferences & Account">

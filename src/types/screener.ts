@@ -54,6 +54,82 @@ export interface IndicatorConfig {
   config: Record<string, unknown>;
 }
 
+export type EmaSelectionMode = "any" | "all" | "one" | "multiple";
+
+export type EmaConditionName =
+  | "touch_from_above"
+  | "piercing_from_below"
+  | "close_above"
+  | "touched_or_pierced_and_closed_above";
+
+export interface EmaConditionConfig {
+  enabled: boolean;
+  candles_since_min: number;
+  candles_since_max: number;
+  require_still_above_now?: boolean;
+}
+
+export type EmaConditionsConfig = Record<EmaConditionName, EmaConditionConfig>;
+
+export interface EmaConfig {
+  periods: number[];
+  selection_mode: EmaSelectionMode;
+  conditions: EmaConditionsConfig;
+}
+
+export const EMA_COMMON_PERIODS = [9, 20, 50, 100, 200] as const;
+
+export const EMA_SELECTION_MODES: Array<{ value: EmaSelectionMode; label: string }> = [
+  { value: "any", label: "Any" },
+  { value: "all", label: "All" },
+  { value: "one", label: "One" },
+  { value: "multiple", label: "Multiple" },
+];
+
+export const EMA_CONDITION_LABELS: Record<EmaConditionName, string> = {
+  touch_from_above: "Touch From Above",
+  piercing_from_below: "Piercing From Below",
+  close_above: "Close Above",
+  touched_or_pierced_and_closed_above: "Touched/Pierced + Closed Above",
+};
+
+export const EMA_CONDITION_HELP: Record<EmaConditionName, string> = {
+  touch_from_above: "Previous close was above EMA, the candle touched the EMA, and the close stayed above.",
+  piercing_from_below: "Previous close was below EMA, the candle crossed through EMA, and the close finished above.",
+  close_above: "The selected candle close is above the EMA.",
+  touched_or_pierced_and_closed_above: "A touch or piercing event occurred in range, and the latest completed close is above EMA.",
+};
+
+export const DEFAULT_EMA_CONDITIONS: EmaConditionsConfig = {
+  touch_from_above: {
+    enabled: true,
+    candles_since_min: 0,
+    candles_since_max: 5,
+  },
+  piercing_from_below: {
+    enabled: false,
+    candles_since_min: 0,
+    candles_since_max: 5,
+  },
+  close_above: {
+    enabled: true,
+    candles_since_min: 0,
+    candles_since_max: 0,
+  },
+  touched_or_pierced_and_closed_above: {
+    enabled: false,
+    candles_since_min: 0,
+    candles_since_max: 5,
+    require_still_above_now: true,
+  },
+};
+
+export const DEFAULT_EMA_CONFIG: EmaConfig = {
+  periods: [9],
+  selection_mode: "any",
+  conditions: DEFAULT_EMA_CONDITIONS,
+};
+
 export interface AreaRule {
   area: string;
   action: string;
@@ -1222,16 +1298,7 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
   },
   {
     name: "ema",
-    fields: [
-      { key: "length", label: "EMA Length", type: "number" },
-      {
-        key: "rule",
-        label: "Signal",
-        type: "select",
-        options: ["above", "below", "touch"],
-      },
-      { key: "tolerance_pct", label: "Tolerance %", type: "number" },
-    ],
+    fields: [],
   },
   {
     name: "macd",
@@ -1528,9 +1595,7 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     confirmation_patterns: [],
   },
   ema: {
-    length: 9,
-    rule: "above",
-    tolerance_pct: 0,
+    ...DEFAULT_EMA_CONFIG,
   },
   macd: {
     rule: "bullish_cross",
@@ -1709,9 +1774,131 @@ export function normalizeDeadAssetsFilter(
   };
 }
 
+function positiveInt(value: unknown, fallback: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallback;
+  }
+  return Math.trunc(numeric);
+}
+
+function nonNegativeInt(value: unknown, fallback: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return fallback;
+  }
+  return Math.trunc(numeric);
+}
+
+function uniquePositivePeriods(values: unknown, fallback: number[]): number[] {
+  const rawPeriods = Array.isArray(values) ? values : [values];
+  const periods = rawPeriods
+    .map((value) => positiveInt(value, 0))
+    .filter((value) => value > 0);
+
+  return periods.length ? Array.from(new Set(periods)) : fallback;
+}
+
+function normalizeEmaSelectionMode(value: unknown): EmaSelectionMode {
+  const mode = String(value ?? "any").trim().toLowerCase();
+  return EMA_SELECTION_MODES.some((item) => item.value === mode)
+    ? (mode as EmaSelectionMode)
+    : "any";
+}
+
+function normalizeEmaCondition(
+  name: EmaConditionName,
+  value: unknown,
+  fallback: EmaConditionConfig,
+): EmaConditionConfig {
+  const source = value && typeof value === "object"
+    ? value as Partial<EmaConditionConfig>
+    : {};
+  const min = nonNegativeInt(source.candles_since_min, fallback.candles_since_min);
+  const max = Math.max(
+    min,
+    nonNegativeInt(source.candles_since_max, fallback.candles_since_max),
+  );
+  const normalized: EmaConditionConfig = {
+    enabled: Boolean(source.enabled),
+    candles_since_min: min,
+    candles_since_max: max,
+  };
+
+  if (name === "touched_or_pierced_and_closed_above") {
+    normalized.require_still_above_now = source.require_still_above_now !== false;
+  }
+
+  return normalized;
+}
+
+function normalizeEmaConditions(rawConfig: Record<string, unknown>, hasExplicitConditions: boolean): EmaConditionsConfig {
+  const rawConditions = rawConfig.conditions && typeof rawConfig.conditions === "object" && !Array.isArray(rawConfig.conditions)
+    ? rawConfig.conditions as Partial<Record<EmaConditionName, EmaConditionConfig>>
+    : {};
+  const conditions = (Object.keys(DEFAULT_EMA_CONDITIONS) as EmaConditionName[]).reduce(
+    (acc, name) => {
+      const fallback = DEFAULT_EMA_CONDITIONS[name];
+      acc[name] = normalizeEmaCondition(name, rawConditions[name], {
+        ...fallback,
+        enabled: hasExplicitConditions ? false : fallback.enabled,
+      });
+      return acc;
+    },
+    {} as EmaConditionsConfig,
+  );
+
+  const rule = String(rawConfig.rule ?? "").trim().toLowerCase();
+  if (!hasExplicitConditions && rule) {
+    Object.keys(conditions).forEach((name) => {
+      conditions[name as EmaConditionName].enabled = false;
+    });
+    if (rule === "touch") {
+      conditions.touch_from_above.enabled = true;
+    } else {
+      conditions.close_above.enabled = true;
+    }
+  }
+
+  if (!Object.values(conditions).some((condition) => condition.enabled)) {
+    conditions.close_above.enabled = true;
+  }
+
+  return conditions;
+}
+
+export function normalizeEmaConfig(rawConfig: Record<string, unknown> = {}): EmaConfig {
+  const configuredPeriods =
+    rawConfig.periods
+      ?? rawConfig.ema_periods
+      ?? rawConfig.lengths
+      ?? rawConfig.length
+      ?? DEFAULT_EMA_CONFIG.periods;
+  const hasExplicitConditions = Object.prototype.hasOwnProperty.call(rawConfig, "conditions");
+
+  return {
+    periods: uniquePositivePeriods(configuredPeriods, DEFAULT_EMA_CONFIG.periods),
+    selection_mode: normalizeEmaSelectionMode(rawConfig.selection_mode),
+    conditions: normalizeEmaConditions(rawConfig, hasExplicitConditions),
+  };
+}
+
 export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorConfig {
   const defaults = getDefaultIndicatorConfig(indicator.name);
   const rawConfig = indicator.config ?? {};
+
+  if (indicator.name === "ema") {
+    const hasExplicitConditions = Object.prototype.hasOwnProperty.call(rawConfig, "conditions");
+    return {
+      ...indicator,
+      config: normalizeEmaConfig({
+        ...defaults,
+        ...rawConfig,
+        ...(hasExplicitConditions ? {} : { conditions: undefined }),
+      }),
+    };
+  }
+
   const config = normalizeConfirmationConfig({
     ...defaults,
     ...rawConfig,

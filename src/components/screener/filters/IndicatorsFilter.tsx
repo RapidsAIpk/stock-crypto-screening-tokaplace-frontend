@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { AreaRule, IndicatorConfig, IndicatorName, IndicatorTimeframe, TimeframeMode, TrendyAdxCondition } from "@/types/screener";
+import type { AreaRule, EmaConditionName, EmaConfig, IndicatorConfig, IndicatorName, IndicatorTimeframe, TimeframeMode, TrendyAdxCondition } from "@/types/screener";
 import {
   allowedConfirmationPatternsForTypes,
   collectConfirmationTypes,
+  EMA_CONDITION_LABELS,
   filterConfirmationPatternsForTypes,
   filterVlrCandlePatternsForDirection,
   vlrAllowedCandlePatterns,
@@ -16,10 +17,12 @@ import {
   isTrendAreaRuleDisabled,
   getDefaultIndicatorConfig,
   isChannelLineIndicatorFieldHidden,
+  normalizeEmaConfig,
   trendyAdxConditionsForMode,
 } from "@/types/screener";
 import { Plus, X, ChevronDown, ChevronRight } from "lucide-react";
 import { PresetOrCustomField } from "./PresetOrCustomField";
+import { EmaFilterEditor } from "./EmaFilterEditor";
 
 interface Props {
   indicators: IndicatorConfig[];
@@ -95,6 +98,13 @@ const RELATIVE_VOLUME_FIELD_HELP_TEXT: Record<string, string> = {
   window: "How many completed candles back the selected RVOL signal can occur.",
   vol_alert: "Matches TradingView's Alert when volume reaches input.",
 };
+
+const EMA_SUMMARY_ORDER: EmaConditionName[] = [
+  "touch_from_above",
+  "piercing_from_below",
+  "close_above",
+  "touched_or_pierced_and_closed_above",
+];
 
 const ADX_FIELD_HELP_TEXT: Record<string, string> = {
   window: "Number of completed candles to look back for signals.",
@@ -232,6 +242,15 @@ export function IndicatorsFilter({
     onChange(updated);
   };
 
+  const replaceConfig = (index: number, config: Record<string, unknown>) => {
+    const updated = [...indicators];
+    updated[index] = {
+      ...updated[index],
+      config,
+    };
+    onChange(updated);
+  };
+
   const resetIndicatorConfig = (index: number) => {
     const updated = [...indicators];
     updated[index] = { ...updated[index], config: getDefaultIndicatorConfig(updated[index].name) };
@@ -323,6 +342,17 @@ export function IndicatorsFilter({
       const activeAreas = areas.filter((area) => !isTrendAreaRuleDisabled(area));
       if (!activeAreas.length && areas.length) {
         parts.push("area rules disabled");
+      }
+    }
+    if (ind.name === "ema") {
+      const ema = normalizeEmaConfig(c);
+      parts.push(`EMA ${ema.periods.join("/")}`);
+      parts.push(ema.selection_mode);
+      const activeConditions = EMA_SUMMARY_ORDER
+        .filter((name) => ema.conditions[name].enabled)
+        .map((name) => EMA_CONDITION_LABELS[name].replace(" From ", " "));
+      if (activeConditions.length) {
+        parts.push(activeConditions.join(", "));
       }
     }
     return parts.length > 0 ? parts.join(" · ") : "Using defaults";
@@ -455,6 +485,12 @@ export function IndicatorsFilter({
               {!isCollapsed && def && (
                 <div className="px-3 pb-3 pt-1">
                   <div className="grid grid-cols-2 gap-2">
+                    {ind.name === "ema" && (
+                      <EmaFilterEditor
+                        config={ind.config}
+                        onChange={(nextConfig: EmaConfig) => replaceConfig(idx, nextConfig as unknown as Record<string, unknown>)}
+                      />
+                    )}
                     {def.fields.map((field, fieldIndex) => {
                       if (isIndicatorFieldHidden(ind, field.key)) {
                         return null;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useScreener } from "@/hooks/useScreener";
 import {
+  DEFAULT_EMA_CONFIG,
   describeChannelRespectCandleWindow,
   getChannelRespectHistoryCandleCount,
   getChannelRespectTouchCandleCount,
@@ -30,7 +31,7 @@ describe("indicator defaults", () => {
   });
 
   it("uses TradingView-style defaults for EMA and channel indicators", () => {
-    expect(getDefaultIndicatorConfig("ema")).toMatchObject({ length: 9 });
+    expect(getDefaultIndicatorConfig("ema")).toEqual(DEFAULT_EMA_CONFIG);
     expect(getDefaultIndicatorConfig("lrc")).toMatchObject({ length: 100 });
     expect(getDefaultIndicatorConfig("regression")).toMatchObject({ length: 200 });
     expect(getDefaultIndicatorConfig("trend")).toMatchObject({
@@ -74,12 +75,109 @@ describe("indicator defaults", () => {
       normalizeIndicatorConfig({
         name: "ema",
         timeframe: "single",
-        config: { rule: "below" },
+        config: { selection_mode: "all" },
       }),
     ).toMatchObject({
       config: {
-        length: 9,
-        rule: "below",
+        periods: [9],
+        selection_mode: "all",
+        conditions: DEFAULT_EMA_CONFIG.conditions,
+      },
+    });
+  });
+
+  it("shows EMA through the custom editor instead of legacy generic fields", () => {
+    const fields = INDICATOR_DEFINITIONS.find((item) => item.name === "ema")?.fields ?? [];
+    expect(fields).toEqual([]);
+  });
+
+  it("sends the Phase 1 EMA config in the built request", async () => {
+    const { result } = renderHook(() => useScreener());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      result.current.setIndicators([
+        {
+          name: "ema",
+          timeframe: "single",
+          config: {
+            periods: [9, 20],
+            selection_mode: "any",
+            conditions: {
+              touch_from_above: {
+                enabled: true,
+                candles_since_min: 0,
+                candles_since_max: 5,
+              },
+              piercing_from_below: {
+                enabled: false,
+                candles_since_min: 0,
+                candles_since_max: 5,
+              },
+              close_above: {
+                enabled: true,
+                candles_since_min: 0,
+                candles_since_max: 0,
+              },
+              touched_or_pierced_and_closed_above: {
+                enabled: false,
+                candles_since_min: 0,
+                candles_since_max: 5,
+                require_still_above_now: true,
+              },
+            },
+          },
+        },
+      ]);
+    });
+
+    expect(result.current.buildRequest().indicators[0]).toEqual({
+      name: "ema",
+      timeframe: "single",
+      config: {
+        periods: [9, 20],
+        selection_mode: "any",
+        conditions: DEFAULT_EMA_CONFIG.conditions,
+      },
+    });
+  });
+
+  it("normalizes old EMA length and rule configs into Phase 1 conditions", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "ema",
+      timeframe: "single",
+      config: {
+        length: 20,
+        rule: "touch",
+        tolerance_pct: 0.2,
+      },
+    });
+
+    expect(normalized.config).toEqual({
+      periods: [20],
+      selection_mode: "any",
+      conditions: {
+        touch_from_above: {
+          enabled: true,
+          candles_since_min: 0,
+          candles_since_max: 5,
+        },
+        piercing_from_below: {
+          enabled: false,
+          candles_since_min: 0,
+          candles_since_max: 5,
+        },
+        close_above: {
+          enabled: false,
+          candles_since_min: 0,
+          candles_since_max: 0,
+        },
+        touched_or_pierced_and_closed_above: {
+          enabled: false,
+          candles_since_min: 0,
+          candles_since_max: 5,
+          require_still_above_now: true,
+        },
       },
     });
   });
