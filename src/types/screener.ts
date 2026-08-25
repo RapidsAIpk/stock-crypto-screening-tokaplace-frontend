@@ -160,7 +160,7 @@ export type ConfluenceLineRelation = "close_above" | "close_below" | "none";
 export interface ConfluenceSource {
   id: string;
   channel_type: ChannelType;
-  selection: ConfluenceSelection;
+  selection?: ConfluenceSelection;
   length: number;
   width_coeff?: number | null;
   upper_dev?: number | null;
@@ -1874,7 +1874,9 @@ export function normalizeEmaConfig(rawConfig: Record<string, unknown> = {}): Ema
       ?? rawConfig.lengths
       ?? rawConfig.length
       ?? DEFAULT_EMA_CONFIG.periods;
-  const hasExplicitConditions = Object.prototype.hasOwnProperty.call(rawConfig, "conditions");
+  const hasExplicitConditions =
+    Object.prototype.hasOwnProperty.call(rawConfig, "conditions")
+    && rawConfig.conditions !== undefined;
 
   return {
     periods: uniquePositivePeriods(configuredPeriods, DEFAULT_EMA_CONFIG.periods),
@@ -1888,14 +1890,24 @@ export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorC
   const rawConfig = indicator.config ?? {};
 
   if (indicator.name === "ema") {
-    const hasExplicitConditions = Object.prototype.hasOwnProperty.call(rawConfig, "conditions");
+    const hasExplicitPeriods =
+      rawConfig.periods != null
+      || rawConfig.ema_periods != null
+      || rawConfig.lengths != null
+      || rawConfig.length != null;
+    const hasExplicitConditions =
+      Object.prototype.hasOwnProperty.call(rawConfig, "conditions")
+      && rawConfig.conditions !== undefined;
+    const emaConfigInput = {
+      ...rawConfig,
+      ...(hasExplicitPeriods ? {} : { periods: defaults.periods }),
+      ...(rawConfig.selection_mode == null ? { selection_mode: defaults.selection_mode } : {}),
+      ...(hasExplicitConditions || rawConfig.rule != null ? {} : { conditions: defaults.conditions }),
+    };
+
     return {
       ...indicator,
-      config: normalizeEmaConfig({
-        ...defaults,
-        ...rawConfig,
-        ...(hasExplicitConditions ? {} : { conditions: undefined }),
-      }),
+      config: normalizeEmaConfig(emaConfigInput) as unknown as IndicatorConfig["config"],
     };
   }
 
