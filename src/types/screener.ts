@@ -135,6 +135,12 @@ export interface AreaRule {
   action: string;
   window: number | null;
   tolerance?: number | null;
+  candles_since_min?: number | null;
+  candles_since_max?: number | null;
+  min_consecutive_below?: number | null;
+  below_candles_min?: number | null;
+  below_candles_max?: number | null;
+  require_still_above_now?: boolean;
   touch_type?: string | null;
   breach_type?: string | null;
   breach_direction?: string | null;
@@ -703,6 +709,10 @@ export const TREND_CHANNEL_LINE_ACTIONS = [
   "closed_below",
   "on_line",
   "breach",
+  "piercing_from_below",
+  "reclaimed_from_below_bullish",
+  "rejected_from_above_bullish",
+  "rejected_from_below_bearish",
 ] as const;
 
 export const TREND_CHANNEL_ZONE_ACTIONS = [
@@ -710,7 +720,34 @@ export const TREND_CHANNEL_ZONE_ACTIONS = [
   "entered",
   "rejected",
   "breach",
+  "piercing_from_below",
+  "reclaimed_from_below_bullish",
+  "rejected_from_above_bullish",
+  "rejected_from_below_bearish",
 ] as const;
+
+export const CHANNEL_SELECTION_MODES = ["any", "all", "one", "multiple"] as const;
+
+export type ChannelSelectionMode = (typeof CHANNEL_SELECTION_MODES)[number];
+
+export const CHANNEL_PHASE2_ACTIONS = [
+  "piercing_from_below",
+  "reclaimed_from_below_bullish",
+  "rejected_from_above_bullish",
+  "rejected_from_below_bearish",
+] as const;
+
+export type ChannelPhase2Action = (typeof CHANNEL_PHASE2_ACTIONS)[number];
+
+export function isPhase2ChannelAction(action: unknown): boolean {
+  return CHANNEL_PHASE2_ACTIONS.includes(
+    String(action ?? "").trim().toLowerCase() as ChannelPhase2Action,
+  );
+}
+
+export function isReclaimChannelAction(action: unknown): boolean {
+  return String(action ?? "").trim().toLowerCase() === "reclaimed_from_below_bullish";
+}
 
 export const DEFAULT_TREND_AREA_RULE: AreaRule = {
   area: "top_line",
@@ -734,6 +771,12 @@ export const CHANNEL_LINE_CLOSE_ACTIONS = [
   "close_below",
   "stay_above",
   "stay_below",
+] as const;
+
+export const CHANNEL_LINE_ACTIONS = [
+  CHANNEL_LINE_TOUCH_ACTION,
+  ...CHANNEL_LINE_CLOSE_ACTIONS,
+  ...CHANNEL_PHASE2_ACTIONS,
 ] as const;
 
 export type ChannelLineCloseAction = (typeof CHANNEL_LINE_CLOSE_ACTIONS)[number];
@@ -761,9 +804,27 @@ export function isChannelLineIndicatorFieldHidden(
   const action = String(config.action ?? CHANNEL_LINE_TOUCH_ACTION).trim().toLowerCase();
   const windowType = String(config.window_type ?? "continuous").trim().toLowerCase();
   const confirmation = Boolean(config.confirmation);
+  const phase2Action = isPhase2ChannelAction(action);
 
   if (fieldKey === "touch_type") {
     return action !== CHANNEL_LINE_TOUCH_ACTION;
+  }
+
+  if (fieldKey === "window") {
+    return phase2Action;
+  }
+
+  if (fieldKey === "candles_since_min" || fieldKey === "candles_since_max") {
+    return !phase2Action;
+  }
+
+  if (
+    fieldKey === "min_consecutive_below" ||
+    fieldKey === "below_candles_min" ||
+    fieldKey === "below_candles_max" ||
+    fieldKey === "require_still_above_now"
+  ) {
+    return !isReclaimChannelAction(action);
   }
 
   if (
@@ -1162,7 +1223,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         key: "action",
         label: "Signal",
         type: "select",
-        options: ["touch", "close_above", "close_below", "stay_above", "stay_below"],
+        options: CHANNEL_LINE_ACTIONS,
+      },
+      {
+        key: "selection_mode",
+        label: "Selection Mode",
+        type: "select",
+        options: CHANNEL_SELECTION_MODES,
       },
       {
         key: "touch_type",
@@ -1171,6 +1238,10 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         options: TOUCH_TYPES,
       },
       { key: "window", label: "How Many Candles", type: "number" },
+      { key: "candles_since_min", label: "Candles Since Min", type: "number" },
+      { key: "candles_since_max", label: "Candles Since Max", type: "number" },
+      { key: "min_consecutive_below", label: "Min Consecutive Below", type: "number" },
+      { key: "require_still_above_now", label: "Require Still Above Now", type: "boolean" },
       { key: "tolerance", label: "Tolerance %", type: "number" },
       {
         key: "r_filter",
@@ -1216,7 +1287,13 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         key: "action",
         label: "Signal",
         type: "select",
-        options: ["touch", "close_above", "close_below", "stay_above", "stay_below"],
+        options: CHANNEL_LINE_ACTIONS,
+      },
+      {
+        key: "selection_mode",
+        label: "Selection Mode",
+        type: "select",
+        options: CHANNEL_SELECTION_MODES,
       },
       {
         key: "touch_type",
@@ -1225,6 +1302,10 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
         options: TOUCH_TYPES,
       },
       { key: "window", label: "How Many Candles", type: "number" },
+      { key: "candles_since_min", label: "Candles Since Min", type: "number" },
+      { key: "candles_since_max", label: "Candles Since Max", type: "number" },
+      { key: "min_consecutive_below", label: "Min Consecutive Below", type: "number" },
+      { key: "require_still_above_now", label: "Require Still Above Now", type: "boolean" },
       { key: "tolerance", label: "Tolerance %", type: "number" },
       { key: "confirmation", label: "Require Confirmation", type: "boolean" },
       {
@@ -1248,6 +1329,12 @@ export const INDICATOR_DEFINITIONS: IndicatorDefinition[] = [
       { key: "length", label: "Lookback", type: "number" },
       { key: "show_last_channel", label: "Show Last Channel", type: "boolean" },
       { key: "wait_for_break", label: "Wait For Break", type: "boolean" },
+      {
+        key: "selection_mode",
+        label: "Selection Mode",
+        type: "select",
+        options: CHANNEL_SELECTION_MODES,
+      },
       { key: "areas", label: "Area Rules", type: "area-list" },
     ],
   },
@@ -1548,6 +1635,7 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     lower_dev: 2,
     lines: ["middle"],
     action: "touch",
+    selection_mode: "all",
     touch_type: "wick",
     window: 1,
     tolerance: 0,
@@ -1565,6 +1653,7 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     interval_step: 1,
     lines: ["middle"],
     action: "touch",
+    selection_mode: "all",
     touch_type: "wick",
     window: 1,
     tolerance: 0,
@@ -1578,6 +1667,7 @@ const INDICATOR_DEFAULT_CONFIGS: Record<IndicatorName, Record<string, unknown>> 
     length: 8,
     show_last_channel: true,
     wait_for_break: true,
+    selection_mode: "all",
     areas: [{ ...DEFAULT_TREND_AREA_RULE }],
   },
   linreg_candles: {
@@ -1885,6 +1975,54 @@ export function normalizeEmaConfig(rawConfig: Record<string, unknown> = {}): Ema
   };
 }
 
+function normalizeChannelSelectionMode(value: unknown): ChannelSelectionMode {
+  const normalized = String(value ?? "all").trim().toLowerCase();
+  return CHANNEL_SELECTION_MODES.includes(normalized as ChannelSelectionMode)
+    ? normalized as ChannelSelectionMode
+    : "all";
+}
+
+function normalizePhase2ChannelFields(config: Record<string, unknown>): Record<string, unknown> {
+  const action = String(config.action ?? "").trim().toLowerCase();
+  if (!isPhase2ChannelAction(action)) {
+    return config;
+  }
+
+  const next: Record<string, unknown> = {
+    ...config,
+    candles_since_min: config.candles_since_min ?? 0,
+    candles_since_max: config.candles_since_max ?? 5,
+    window: config.window ?? 1,
+  };
+
+  if (isReclaimChannelAction(action)) {
+    next.min_consecutive_below = config.min_consecutive_below ?? 1;
+    next.below_candles_min = config.below_candles_min ?? 1;
+    next.below_candles_max = config.below_candles_max ?? 5;
+    next.require_still_above_now = config.require_still_above_now ?? true;
+  }
+
+  return next;
+}
+
+function normalizeTrendAreaRule(area: unknown): AreaRule {
+  const rawArea = area && typeof area === "object"
+    ? area as Partial<AreaRule>
+    : {};
+  const merged = {
+    ...DEFAULT_TREND_AREA_RULE,
+    ...rawArea,
+    area: rawArea.area ?? DEFAULT_TREND_AREA_RULE.area,
+    action: rawArea.action ?? defaultTrendActionForArea(rawArea.area),
+  } as AreaRule;
+
+  return normalizePhase2ChannelFields(merged as unknown as Record<string, unknown>) as unknown as AreaRule;
+}
+
+function defaultTrendActionForArea(area?: string | null): string {
+  return String(area ?? "").endsWith("_zone") ? "entered" : "touched";
+}
+
 export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorConfig {
   const defaults = getDefaultIndicatorConfig(indicator.name);
   const rawConfig = indicator.config ?? {};
@@ -1952,6 +2090,32 @@ export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorC
       delete config.confirmation_patterns;
       delete config.confirmation_window;
     }
+  }
+
+  if (indicator.name === "lrc" || indicator.name === "regression") {
+    const next = normalizePhase2ChannelFields({
+      ...config,
+      selection_mode: normalizeChannelSelectionMode(config.selection_mode),
+    });
+
+    return {
+      ...indicator,
+      config: next as IndicatorConfig["config"],
+    };
+  }
+
+  if (indicator.name === "trend") {
+    const rawAreas = Array.isArray(config.areas) ? config.areas : defaults.areas;
+    const next = {
+      ...config,
+      selection_mode: normalizeChannelSelectionMode(config.selection_mode),
+      areas: (rawAreas as unknown[]).map(normalizeTrendAreaRule),
+    };
+
+    return {
+      ...indicator,
+      config: next as IndicatorConfig["config"],
+    };
   }
 
   return {

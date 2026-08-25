@@ -86,6 +86,101 @@ describe("indicator defaults", () => {
     });
   });
 
+  it("defaults channel indicator selection mode to all", () => {
+    expect(getDefaultIndicatorConfig("lrc")).toMatchObject({ selection_mode: "all" });
+    expect(getDefaultIndicatorConfig("regression")).toMatchObject({ selection_mode: "all" });
+    expect(getDefaultIndicatorConfig("trend")).toMatchObject({ selection_mode: "all" });
+  });
+
+  it("normalizes Phase 2 LRC and regression actions with candles-since ranges", () => {
+    expect(
+      normalizeIndicatorConfig({
+        name: "lrc",
+        timeframe: "single",
+        config: {
+          lines: ["lower"],
+          action: "piercing_from_below",
+        },
+      }).config,
+    ).toMatchObject({
+      lines: ["lower"],
+      action: "piercing_from_below",
+      selection_mode: "all",
+      candles_since_min: 0,
+      candles_since_max: 5,
+      window: 1,
+    });
+
+    expect(
+      normalizeIndicatorConfig({
+        name: "regression",
+        timeframe: "single",
+        config: {
+          lines: ["lower"],
+          action: "reclaimed_from_below_bullish",
+          selection_mode: "any",
+        },
+      }).config,
+    ).toMatchObject({
+      lines: ["lower"],
+      action: "reclaimed_from_below_bullish",
+      selection_mode: "any",
+      candles_since_min: 0,
+      candles_since_max: 5,
+      min_consecutive_below: 1,
+      require_still_above_now: true,
+      window: 1,
+    });
+  });
+
+  it("normalizes Phase 2 trend area actions with per-area candles-since ranges", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "trend",
+      timeframe: "single",
+      config: {
+        areas: [
+          {
+            area: "bottom_line",
+            action: "rejected_from_above_bullish",
+            window: 1,
+          },
+        ],
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      selection_mode: "all",
+      areas: [
+        {
+          area: "bottom_line",
+          action: "rejected_from_above_bullish",
+          candles_since_min: 0,
+          candles_since_max: 5,
+          window: 1,
+        },
+      ],
+    });
+  });
+
+  it("keeps old channel action window configs unchanged apart from selection mode defaulting", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "lrc",
+      timeframe: "single",
+      config: {
+        action: "touch",
+        window: 3,
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      action: "touch",
+      selection_mode: "all",
+      window: 3,
+    });
+    expect(normalized.config).not.toHaveProperty("candles_since_min");
+    expect(normalized.config).not.toHaveProperty("candles_since_max");
+  });
+
   it("shows EMA through the custom editor instead of legacy generic fields", () => {
     const fields = INDICATOR_DEFINITIONS.find((item) => item.name === "ema")?.fields ?? [];
     expect(fields).toEqual([]);
