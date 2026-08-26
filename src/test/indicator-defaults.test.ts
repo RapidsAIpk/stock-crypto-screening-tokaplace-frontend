@@ -593,6 +593,92 @@ describe("indicator defaults", () => {
     });
   });
 
+  it("normalizes Trendy ADX direction conditions for the Phase 3 payload", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        window: 4,
+        min_history: 240,
+        conditions: [
+          {
+            id: "di_plus_direction",
+            direction: "up",
+            candles_since_direction_change_min: 1,
+            candles_since_direction_change_max: 3,
+          },
+          { id: "adx_direction" },
+        ],
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      window: 4,
+      min_history: 240,
+      conditions: [
+        {
+          id: "di_plus_direction",
+          direction: "up",
+          candles_since_direction_change_min: 1,
+          candles_since_direction_change_max: 3,
+        },
+        {
+          id: "adx_direction",
+          direction: "any",
+          candles_since_direction_change_min: 0,
+          candles_since_direction_change_max: 5,
+        },
+      ],
+    });
+  });
+
+  it("normalizes Trendy ADX event and active ranges without reusing window", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        window: 7,
+        min_history: 300,
+        conditions: [
+          { id: "adx_crossed_above_20", candles_since_min: 2, candles_since_max: 6 },
+          { id: "adx_above_25", active_candles_min: 3, active_candles_max: 8 },
+        ],
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      window: 7,
+      min_history: 300,
+      conditions: [
+        { id: "adx_crossed_above_20", candles_since_min: 2, candles_since_max: 6 },
+        { id: "adx_above_25", active_candles_min: 3, active_candles_max: 8 },
+      ],
+    });
+  });
+
+  it("converts legacy Trendy ADX candles_since by condition category", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        conditions: [
+          { id: "di_crossed_above", candles_since: 4 },
+          { id: "di_already_above", candles_since: 6 },
+          { id: "di_near_cross", distance: 2 },
+        ],
+      },
+    });
+
+    expect(normalized.config.conditions).toEqual([
+      { id: "di_crossed_above", candles_since_min: 0, candles_since_max: 4 },
+      { id: "di_already_above", active_candles_min: 6, active_candles_max: null },
+      { id: "di_near_cross", distance: 2 },
+    ]);
+  });
+
   it("uses TradingView-style defaults for Relative Volume", () => {
     expect(getDefaultIndicatorConfig("relative_volume")).toEqual({
       length: 30,

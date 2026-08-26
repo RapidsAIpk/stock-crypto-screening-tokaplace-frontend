@@ -20,7 +20,12 @@ import {
   getDefaultIndicatorConfig,
   isChannelLineIndicatorFieldHidden,
   normalizeEmaConfig,
+  defaultTrendyAdxCondition,
+  isTrendyAdxActiveCondition,
+  isTrendyAdxDirectionCondition,
+  isTrendyAdxEventCondition,
   trendyAdxConditionsForMode,
+  TRENDY_ADX_DIRECTIONS,
 } from "@/types/screener";
 import { Plus, X, ChevronDown, ChevronRight } from "lucide-react";
 import { PresetOrCustomField } from "./PresetOrCustomField";
@@ -410,7 +415,7 @@ export function IndicatorsFilter({
     const current = adxConditions(indicatorIndex);
     const next = current.some((condition) => condition.id === conditionId)
       ? current.filter((condition) => condition.id !== conditionId)
-      : [...current, { id: conditionId }];
+      : [...current, defaultTrendyAdxCondition(conditionId)];
     updateConfig(indicatorIndex, "conditions", next);
   };
 
@@ -1062,15 +1067,130 @@ export function IndicatorsFilter({
                                             />
                                             <span className="text-xs text-foreground">{conditionDef.label}</span>
                                           </div>
-                                          {isSelected && conditionDef.sub === "candles_since" && (
-                                            <div className="pl-6">
-                                              <PresetOrCustomField
-                                                label="Candles Since Event"
-                                                value={(selected?.candles_since as number) ?? 0}
-                                                presets={[0, 1, 2, 3, 5, 10]}
-                                                suffix=" candles ago"
-                                                onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { candles_since: v })}
-                                              />
+                                          {isSelected && isTrendyAdxDirectionCondition(conditionDef.id) && (
+                                            <div className="grid gap-2 pl-6 sm:grid-cols-3">
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Direction
+                                                </label>
+                                                <select
+                                                  value={String(selected?.direction ?? "any")}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, { direction: event.target.value as TrendyAdxCondition["direction"] })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                >
+                                                  {TRENDY_ADX_DIRECTIONS.map((direction) => (
+                                                    <option key={direction} value={direction}>
+                                                      {direction.replace(/_/g, " ")}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Direction Change Min
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={Number(selected?.candles_since_direction_change_min ?? 0)}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_direction_change_min: Number(event.target.value),
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Direction Change Max
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={Number(selected?.candles_since_direction_change_max ?? 5)}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_direction_change_max: Number(event.target.value),
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                          {isSelected && isTrendyAdxEventCondition(conditionDef.id) && (
+                                            <div className="grid gap-2 pl-6 sm:grid-cols-2">
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Event Min
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={Number(selected?.candles_since_min ?? 0)}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_min: Number(event.target.value),
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Event Max
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={Number(selected?.candles_since_max ?? 5)}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_max: Number(event.target.value),
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                          {isSelected && isTrendyAdxActiveCondition(conditionDef.id) && (
+                                            <div className="grid gap-2 pl-6 sm:grid-cols-2">
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Consecutive Active Min
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={Number(selected?.active_candles_min ?? 1)}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      active_candles_min: Number(event.target.value),
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Consecutive Active Max
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={0}
+                                                  value={Number(selected?.active_candles_max ?? 5)}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      active_candles_max: Number(event.target.value),
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
                                             </div>
                                           )}
                                           {isSelected && conditionDef.sub === "distance" && (
