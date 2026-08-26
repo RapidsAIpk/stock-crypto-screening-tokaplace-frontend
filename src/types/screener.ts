@@ -853,7 +853,9 @@ export function isChannelLineIndicatorFieldHidden(
 
 export type TrendyAdxMode = "bullish" | "bearish" | "compression" | "weak";
 
-export type TrendyAdxConditionSub = "none" | "candles_since" | "distance";
+export type TrendyAdxDirection = "any" | "up" | "down" | "flat";
+
+export type TrendyAdxConditionSub = "none" | "event_range" | "distance" | "direction_range";
 
 export interface TrendyAdxConditionDef {
   id: string;
@@ -865,24 +867,124 @@ export interface TrendyAdxConditionDef {
 export interface TrendyAdxCondition {
   id: string;
   candles_since?: number | null;
+  candles_since_min?: number | null;
+  candles_since_max?: number | null;
+  active_candles_min?: number | null;
+  active_candles_max?: number | null;
+  direction?: TrendyAdxDirection;
+  candles_since_direction_change_min?: number | null;
+  candles_since_direction_change_max?: number | null;
   distance?: number | null;
+}
+
+export const TRENDY_ADX_DIRECTIONS: TrendyAdxDirection[] = ["any", "up", "down", "flat"];
+
+export const TRENDY_ADX_DIRECTION_CONDITION_IDS = [
+  "adx_direction",
+  "di_plus_direction",
+  "di_minus_direction",
+] as const;
+
+export const TRENDY_ADX_EVENT_CONDITION_IDS = [
+  "di_crossed_above",
+  "di_touched_bounced",
+  "adx_crossed_above_20",
+  "adx_crossed_above_dominant",
+  "adx_crossed_above_opposing",
+  "adx_crossed_above_both",
+  "bg_just_started",
+  "bg_changed_recently",
+  "adx_turning_up",
+] as const;
+
+export const TRENDY_ADX_ACTIVE_CONDITION_IDS = [
+  "di_already_above",
+  "adx_below_20",
+  "adx_above_20",
+  "adx_above_25",
+  "adx_above_40",
+  "adx_below_dominant",
+  "adx_above_dominant",
+  "adx_near_dominant",
+  "adx_below_opposing",
+  "adx_above_opposing",
+  "adx_near_opposing",
+  "adx_below_both",
+  "adx_between_both",
+  "adx_above_both",
+  "bg_active",
+  "bg_active_for_x",
+  "di_close_together",
+  "di_touching",
+  "di_close_no_separation",
+  "adx_below_both_di",
+] as const;
+
+const TRENDY_ADX_DIRECTION_CONDITION_SET = new Set<string>(TRENDY_ADX_DIRECTION_CONDITION_IDS);
+const TRENDY_ADX_EVENT_CONDITION_SET = new Set<string>(TRENDY_ADX_EVENT_CONDITION_IDS);
+const TRENDY_ADX_ACTIVE_CONDITION_SET = new Set<string>(TRENDY_ADX_ACTIVE_CONDITION_IDS);
+
+export function isTrendyAdxDirectionCondition(id: string): boolean {
+  return TRENDY_ADX_DIRECTION_CONDITION_SET.has(id);
+}
+
+export function isTrendyAdxEventCondition(id: string): boolean {
+  return TRENDY_ADX_EVENT_CONDITION_SET.has(id);
+}
+
+export function isTrendyAdxActiveCondition(id: string): boolean {
+  return TRENDY_ADX_ACTIVE_CONDITION_SET.has(id);
+}
+
+export function defaultTrendyAdxCondition(id: string): TrendyAdxCondition {
+  if (isTrendyAdxDirectionCondition(id)) {
+    return {
+      id,
+      direction: "any",
+      candles_since_direction_change_min: 0,
+      candles_since_direction_change_max: 5,
+    };
+  }
+
+  if (isTrendyAdxEventCondition(id)) {
+    return {
+      id,
+      candles_since_min: 0,
+      candles_since_max: 5,
+    };
+  }
+
+  if (isTrendyAdxActiveCondition(id)) {
+    return {
+      id,
+      active_candles_min: 1,
+      active_candles_max: 5,
+    };
+  }
+
+  return { id };
 }
 
 // Bullish and Bearish share the same condition set — "dominant"/"opposing" DI
 // line is resolved server-side based on the selected mode.
 export const TRENDY_ADX_DIRECTIONAL_CONDITIONS: TrendyAdxConditionDef[] = [
+  // Phase 3 line direction filters
+  { id: "adx_direction", label: "ADX Direction", sub: "direction_range", category: "Line Direction" },
+  { id: "di_plus_direction", label: "DI+ Direction", sub: "direction_range", category: "Line Direction" },
+  { id: "di_minus_direction", label: "DI- Direction", sub: "direction_range", category: "Line Direction" },
+
   // DI Line Comparisons / Crosses
-  { id: "di_crossed_above", label: "DI cross: dominant line just crossed above opposing", sub: "candles_since", category: "DI Line Crossovers & Position" },
+  { id: "di_crossed_above", label: "DI cross: dominant line just crossed above opposing", sub: "event_range", category: "DI Line Crossovers & Position" },
   { id: "di_already_above", label: "DI already above (direction is active)", sub: "none", category: "DI Line Crossovers & Position" },
   { id: "di_near_cross", label: "DI close to crossing above (early watch)", sub: "distance", category: "DI Line Crossovers & Position" },
-  { id: "di_touched_bounced", label: "DI touched opposing line and bounced", sub: "none", category: "DI Line Crossovers & Position" },
+  { id: "di_touched_bounced", label: "DI touched opposing line and bounced", sub: "event_range", category: "DI Line Crossovers & Position" },
   { id: "di_separating", label: "DI separating upward (pressure getting stronger)", sub: "none", category: "DI Line Crossovers & Position" },
   { id: "di_opposite_falling_away", label: "Opposing DI falling away (weakening)", sub: "none", category: "DI Line Crossovers & Position" },
 
   // ADX Threshold Levels
   { id: "adx_below_20", label: "ADX below threshold (early but weak)", sub: "none", category: "ADX Threshold Levels" },
   { id: "adx_near_20", label: "ADX near threshold (strength building)", sub: "distance", category: "ADX Threshold Levels" },
-  { id: "adx_crossed_above_20", label: "ADX crossed above threshold", sub: "candles_since", category: "ADX Threshold Levels" },
+  { id: "adx_crossed_above_20", label: "ADX crossed above threshold", sub: "event_range", category: "ADX Threshold Levels" },
   { id: "adx_above_20", label: "ADX above threshold (trend active)", sub: "none", category: "ADX Threshold Levels" },
   { id: "adx_above_25", label: "ADX above 25 (strong trend)", sub: "none", category: "ADX Threshold Levels" },
   { id: "adx_above_40", label: "ADX above 40 (very strong / possible exhaustion)", sub: "none", category: "ADX Threshold Levels" },
@@ -890,39 +992,45 @@ export const TRENDY_ADX_DIRECTIONAL_CONDITIONS: TrendyAdxConditionDef[] = [
   // ADX vs Dominant DI
   { id: "adx_below_dominant", label: "ADX below dominant DI (strength not fully confirmed)", sub: "none", category: "ADX vs Dominant DI Line" },
   { id: "adx_near_dominant", label: "ADX close to dominant DI (almost confirmed)", sub: "distance", category: "ADX vs Dominant DI Line" },
-  { id: "adx_crossed_above_dominant", label: "ADX crossed above dominant DI (confirmed)", sub: "candles_since", category: "ADX vs Dominant DI Line" },
+  { id: "adx_crossed_above_dominant", label: "ADX crossed above dominant DI (confirmed)", sub: "event_range", category: "ADX vs Dominant DI Line" },
   { id: "adx_above_dominant", label: "ADX above dominant DI (active)", sub: "none", category: "ADX vs Dominant DI Line" },
 
   // ADX vs Opposing DI
   { id: "adx_below_opposing", label: "ADX below opposing DI (still weak)", sub: "none", category: "ADX vs Opposing DI Line" },
   { id: "adx_near_opposing", label: "ADX close to opposing DI", sub: "distance", category: "ADX vs Opposing DI Line" },
-  { id: "adx_crossed_above_opposing", label: "ADX crossed above opposing DI (opposing pressure weakening)", sub: "candles_since", category: "ADX vs Opposing DI Line" },
+  { id: "adx_crossed_above_opposing", label: "ADX crossed above opposing DI (opposing pressure weakening)", sub: "event_range", category: "ADX vs Opposing DI Line" },
   { id: "adx_above_opposing", label: "ADX above opposing DI", sub: "none", category: "ADX vs Opposing DI Line" },
 
   // ADX vs Both DI Lines
   { id: "adx_below_both", label: "ADX below both DI lines (very early setup)", sub: "none", category: "ADX vs Both DI Lines" },
   { id: "adx_between_both", label: "ADX between the two DI lines (developing)", sub: "none", category: "ADX vs Both DI Lines" },
-  { id: "adx_crossed_above_both", label: "ADX crossed above both DI lines (major confirmation)", sub: "candles_since", category: "ADX vs Both DI Lines" },
+  { id: "adx_crossed_above_both", label: "ADX crossed above both DI lines (major confirmation)", sub: "event_range", category: "ADX vs Both DI Lines" },
   { id: "adx_above_both", label: "ADX above both DI lines (strong confirmation)", sub: "none", category: "ADX vs Both DI Lines" },
 
   // Background Zones
-  { id: "bg_just_started", label: "Background zone just started", sub: "candles_since", category: "Background Zones" },
+  { id: "bg_just_started", label: "Background zone just started", sub: "event_range", category: "Background Zones" },
   { id: "bg_active", label: "Background zone is active", sub: "none", category: "Background Zones" },
-  { id: "bg_active_for_x", label: "Background zone active for at least X candles", sub: "candles_since", category: "Background Zones" },
+  { id: "bg_active_for_x", label: "Background zone active for at least X candles", sub: "none", category: "Background Zones" },
 ];
 
 export const TRENDY_ADX_COMPRESSION_CONDITIONS: TrendyAdxConditionDef[] = [
+  { id: "adx_direction", label: "ADX Direction", sub: "direction_range", category: "Line Direction" },
+  { id: "di_plus_direction", label: "DI+ Direction", sub: "direction_range", category: "Line Direction" },
+  { id: "di_minus_direction", label: "DI- Direction", sub: "direction_range", category: "Line Direction" },
   { id: "di_close_together", label: "DI+ and DI- close together", sub: "distance", category: "DI Convergence" },
   { id: "di_touching", label: "DI+ and DI- touching", sub: "none", category: "DI Convergence" },
   { id: "di_pink_toward_blue", label: "DI+ moving toward DI- (possible bearish setup forming)", sub: "none", category: "DI Convergence" },
   { id: "di_blue_toward_pink", label: "DI- moving toward DI+ (possible bullish setup forming)", sub: "none", category: "DI Convergence" },
   { id: "adx_below_20", label: "ADX below threshold", sub: "none", category: "ADX Strength" },
-  { id: "adx_turning_up", label: "ADX turning up", sub: "none", category: "ADX Strength" },
+  { id: "adx_turning_up", label: "ADX turning up", sub: "event_range", category: "ADX Strength" },
   { id: "adx_close_to_20", label: "ADX close to threshold", sub: "distance", category: "ADX Strength" },
-  { id: "bg_changed_recently", label: "Background changed recently", sub: "candles_since", category: "Background State" },
+  { id: "bg_changed_recently", label: "Background changed recently", sub: "event_range", category: "Background State" },
 ];
 
 export const TRENDY_ADX_WEAK_CONDITIONS: TrendyAdxConditionDef[] = [
+  { id: "adx_direction", label: "ADX Direction", sub: "direction_range", category: "Line Direction" },
+  { id: "di_plus_direction", label: "DI+ Direction", sub: "direction_range", category: "Line Direction" },
+  { id: "di_minus_direction", label: "DI- Direction", sub: "direction_range", category: "Line Direction" },
   { id: "adx_below_20", label: "ADX below threshold", sub: "none", category: "ADX Weakness" },
   { id: "adx_below_both_di", label: "ADX below both DI lines", sub: "none", category: "ADX Weakness" },
   { id: "adx_falling", label: "ADX falling", sub: "none", category: "ADX Weakness" },
@@ -2023,6 +2131,77 @@ function defaultTrendActionForArea(area?: string | null): string {
   return String(area ?? "").endsWith("_zone") ? "entered" : "touched";
 }
 
+function normalizeTrendyAdxDirection(value: unknown): TrendyAdxDirection {
+  return TRENDY_ADX_DIRECTIONS.includes(value as TrendyAdxDirection)
+    ? value as TrendyAdxDirection
+    : "any";
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTrendyAdxCondition(condition: unknown): TrendyAdxCondition | null {
+  if (!condition || typeof condition !== "object") return null;
+
+  const raw = condition as TrendyAdxCondition;
+  const id = String(raw.id ?? "").trim();
+  if (!id) return null;
+
+  const {
+    candles_since: legacyCandlesSince,
+    candles_since_min: rawEventMin,
+    candles_since_max: rawEventMax,
+    active_candles_min: rawActiveMin,
+    active_candles_max: rawActiveMax,
+    direction: rawDirection,
+    candles_since_direction_change_min: rawDirectionMin,
+    candles_since_direction_change_max: rawDirectionMax,
+    ...rest
+  } = raw;
+
+  const next: TrendyAdxCondition = {
+    ...rest,
+    id,
+  };
+
+  if (raw.distance != null) {
+    next.distance = raw.distance;
+  }
+
+  if (isTrendyAdxDirectionCondition(id)) {
+    next.direction = normalizeTrendyAdxDirection(rawDirection);
+    next.candles_since_direction_change_min = normalizeNullableNumber(rawDirectionMin) ?? 0;
+    next.candles_since_direction_change_max = normalizeNullableNumber(rawDirectionMax) ?? 5;
+  }
+
+  if (isTrendyAdxEventCondition(id)) {
+    const legacy = normalizeNullableNumber(legacyCandlesSince);
+    next.candles_since_min = normalizeNullableNumber(rawEventMin) ?? 0;
+    next.candles_since_max = normalizeNullableNumber(rawEventMax) ?? legacy ?? 5;
+  }
+
+  if (isTrendyAdxActiveCondition(id)) {
+    const legacy = normalizeNullableNumber(legacyCandlesSince);
+    next.active_candles_min = normalizeNullableNumber(rawActiveMin) ?? legacy ?? 1;
+    next.active_candles_max = normalizeNullableNumber(rawActiveMax);
+    if (next.active_candles_max == null && legacy == null) {
+      next.active_candles_max = 5;
+    }
+  }
+
+  return next;
+}
+
+function normalizeTrendyAdxConditions(conditions: unknown): TrendyAdxCondition[] | undefined {
+  if (!Array.isArray(conditions)) return undefined;
+  return conditions
+    .map(normalizeTrendyAdxCondition)
+    .filter((condition): condition is TrendyAdxCondition => condition != null);
+}
+
 export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorConfig {
   const defaults = getDefaultIndicatorConfig(indicator.name);
   const rawConfig = indicator.config ?? {};
@@ -2116,6 +2295,15 @@ export function normalizeIndicatorConfig(indicator: IndicatorConfig): IndicatorC
       ...indicator,
       config: next as IndicatorConfig["config"],
     };
+  }
+
+  if (indicator.name === "adx") {
+    const normalizedConditions = normalizeTrendyAdxConditions(config.conditions);
+    if (normalizedConditions === undefined) {
+      delete config.conditions;
+    } else {
+      config.conditions = normalizedConditions;
+    }
   }
 
   return {
