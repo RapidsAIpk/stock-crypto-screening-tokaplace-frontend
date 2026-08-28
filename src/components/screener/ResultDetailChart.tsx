@@ -17,20 +17,27 @@ import {
 } from "lightweight-charts";
 import type { FilterDetail, IndicatorDetail, MarketCandle } from "@/types/screener";
 import {
+  ADR_ABOVE_AVERAGE_COLOR,
+  ADR_BELOW_AVERAGE_COLOR,
+  ADR_HIGHLIGHT_COLOR,
+  adrThresholdLabel,
   CHANNEL_RESPECT_HIGHLIGHT_COLOR,
   CONFLUENCE_SOURCE_COLORS,
   createLinearRegressionCandles,
   LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
+  normalizeAdrChartWindow,
   normalizeConfluenceChartSources,
   normalizeLrcChannel,
   normalizeMarketCandles,
   normalizeRegressionChannel,
   normalizeTrendChannel,
   regressionValueAt,
+  resolveAdrCandleReasons,
   resolveChannelRespectCandleReasons,
   resolveChartChannelVisibility,
   resolveConfluenceCandleReasons,
   trendValueAt,
+  type AdrChartWindow,
   type CandleMatchReason,
   type ChartCandle,
   type ConfluenceChartSource,
@@ -46,7 +53,7 @@ import {
   TV_BACKGROUND,
 } from "./trendChannelChartStyles";
 
-type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg";
+type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg" | "adr";
 type RangeOption = 20 | 50 | 100 | "all";
 type TrendyAdxPoint = {
   time: number;
@@ -84,6 +91,8 @@ const ADX_PLUS_COLOR = "#ff00ff";
 const ADX_MINUS_COLOR = "#004cff";
 const ADX_STRENGTH_COLOR = "#facc15";
 const ADX_THRESHOLD_COLOR = "#d8d800";
+const ADR_AVERAGE_LINE_COLOR = "#38bdf8";
+const ADR_THRESHOLD_LINE_COLOR = "#facc15";
 
 function confluenceValueAt(
   source: ConfluenceChartSource,
@@ -278,6 +287,7 @@ export function ResultDetailChart({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const chartHostRef = useRef<HTMLDivElement>(null);
   const adxChartHostRef = useRef<HTMLDivElement>(null);
+  const adrChartHostRef = useRef<HTMLDivElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
   const candles = useMemo(() => normalizeMarketCandles(rawCandles), [rawCandles]);
   const completedCandles = useMemo(
@@ -292,6 +302,8 @@ export function ResultDetailChart({
     [confluenceChannels, requestFilters],
   );
   const showConfluenceChart = confluenceSources.length === 2;
+  const adrWindow = useMemo(() => normalizeAdrChartWindow(filterDetails), [filterDetails]);
+  const showAdrChart = Boolean(adrWindow);
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
   const adxIndicator = indicatorDetails.find((item) => item.name === "adx");
   const channelVisibility = useMemo(
@@ -341,7 +353,9 @@ export function ResultDetailChart({
           ? "trend"
       : linRegIndicator
         ? "linreg"
-        : "price";
+        : showAdrChart
+          ? "adr"
+          : "price";
   const [mode, setMode] = useState<ChartMode>(
     initialMode,
   );
@@ -357,21 +371,27 @@ export function ResultDetailChart({
       || (mode === "regression" && showRegressionChart)
       || (mode === "trend" && showTrendChart)
       || (mode === "linreg" && Boolean(linRegIndicator))
+      || (mode === "adr" && showAdrChart)
     );
     if (!modeAvailable) setMode(initialMode);
   }, [
     initialMode,
     linRegIndicator,
     mode,
+    showAdrChart,
     showConfluenceChart,
     showLrcChart,
     showRegressionChart,
     showTrendChart,
   ]);
 
+  // ADR is a daily-only measure, so its chart plots the completed daily
+  // candles the average was taken over - not the scan's own timeframe bars.
   const source: ChartCandle[] = mode === "linreg" && linRegIndicator
     ? linRegCandles
-    : completedCandles;
+    : mode === "adr" && adrWindow
+      ? adrWindow.candles
+      : completedCandles;
   const channelRespectCandleReasons = useMemo(
     () => resolveChannelRespectCandleReasons(filterDetails, requestFilters, mode),
     [filterDetails, mode, requestFilters],
@@ -380,9 +400,12 @@ export function ResultDetailChart({
     () => resolveConfluenceCandleReasons(filterDetails, confluenceSources),
     [confluenceSources, filterDetails],
   );
+  const adrCandleReasons = useMemo(() => resolveAdrCandleReasons(adrWindow), [adrWindow]);
   const candleReasons = mode === "confluence"
     ? confluenceCandleReasons
-    : channelRespectCandleReasons;
+    : mode === "adr"
+      ? adrCandleReasons
+      : channelRespectCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
@@ -400,8 +423,10 @@ export function ResultDetailChart({
   }, [adxPoints, hoveredTime]);
   const showAdxPane = Boolean(
     adxIndicator
+    && mode !== "adr"
     && adxPoints.some((point) => point.plusDi !== null || point.minusDi !== null || point.adx !== null),
   );
+  const showAdrPane = mode === "adr" && Boolean(adrWindow);
   const selectedRegression = mode === "regression" && regressionChannel && selected
     ? {
         upper: regressionValueAt(regressionChannel, "upper", selectedIndex, source.length),
@@ -439,6 +464,9 @@ export function ResultDetailChart({
         upper: confluenceValueAt(confluenceSource, "upper", selectedIndex, source.length),
       }))
     : [];
+  const selectedAdrRange = mode === "adr" && adrWindow
+    ? adrWindow.ranges[selectedIndex] ?? null
+    : null;
 
   useEffect(() => {
     const host = chartHostRef.current;
@@ -466,7 +494,7 @@ export function ResultDetailChart({
       },
       leftPriceScale: { visible: false },
       timeScale: {
-        visible: !showAdxPane,
+        visible: !showAdxPane && !showAdrPane,
         borderColor: TV_BORDER,
         timeVisible: true,
         secondsVisible: false,
@@ -519,10 +547,11 @@ export function ResultDetailChart({
       kineticScroll: { mouse: true, touch: true },
     });
 
-    const adxHost = adxChartHostRef.current;
-    const adxChart = showAdxPane && adxHost
-      ? createChart(adxHost, {
-          width: Math.max(320, adxHost.clientWidth),
+    const createPaneChart = (
+      host: HTMLDivElement,
+      priceFormatter: (price: number) => string,
+    ) => createChart(host, {
+          width: Math.max(320, host.clientWidth),
           height: 170,
           layout: {
             background: { type: ColorType.Solid, color: TV_BACKGROUND },
@@ -578,7 +607,7 @@ export function ResultDetailChart({
             },
           },
           localization: {
-            priceFormatter: (price) => price.toFixed(3),
+            priceFormatter,
             timeFormatter: (time) => formatTime(unixTime(time), timeZone),
           },
           handleScale: {
@@ -594,7 +623,16 @@ export function ResultDetailChart({
             vertTouchDrag: true,
           },
           kineticScroll: { mouse: true, touch: true },
-        })
+        });
+
+    const adxHost = adxChartHostRef.current;
+    const adxChart = showAdxPane && adxHost
+      ? createPaneChart(adxHost, (price) => price.toFixed(3))
+      : null;
+
+    const adrHost = adrChartHostRef.current;
+    const adrChart = showAdrPane && adrHost && adrWindow
+      ? createPaneChart(adrHost, (price) => formatPrice(price, precision))
       : null;
 
     if (adxChart) {
@@ -649,6 +687,47 @@ export function ResultDetailChart({
       addAdxLine(ADX_PLUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "plusDi"), true);
       addAdxLine(ADX_MINUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "minusDi"), true);
       addAdxLine(ADX_STRENGTH_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "adx"), true);
+    }
+
+    if (adrChart && adrWindow) {
+      // Bar per completed daily candle's own High-Low range, colored against
+      // the average so it's visible at a glance which days pulled ADR up or
+      // down - not just what the final number is.
+      const rangeSeries = adrChart.addSeries(HistogramSeries, {
+        base: 0,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceFormat: { type: "price", precision, minMove: 10 ** -precision },
+      });
+      rangeSeries.setData(adrWindow.candles.map((candle, index) => ({
+        time: candle.time as UTCTimestamp,
+        value: adrWindow.ranges[index],
+        color: adrWindow.ranges[index] >= adrWindow.adr ? ADR_ABOVE_AVERAGE_COLOR : ADR_BELOW_AVERAGE_COLOR,
+      })));
+
+      const addAdrLine = (
+        color: string,
+        style: LineStyle,
+        value: number,
+      ) => {
+        const series = adrChart.addSeries(LineSeries, {
+          color,
+          lineWidth: 2,
+          lineStyle: style,
+          crosshairMarkerVisible: false,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          priceFormat: { type: "price", precision, minMove: 10 ** -precision },
+        });
+        series.setData(adrWindow.candles.map((candle) => ({
+          time: candle.time as UTCTimestamp,
+          value,
+        })));
+      };
+
+      addAdrLine(ADR_AVERAGE_LINE_COLOR, LineStyle.Solid, adrWindow.adr);
+      if (adrWindow.minAdr !== null) addAdrLine(ADR_THRESHOLD_LINE_COLOR, LineStyle.Dashed, adrWindow.minAdr);
+      if (adrWindow.maxAdr !== null) addAdrLine(ADR_THRESHOLD_LINE_COLOR, LineStyle.Dashed, adrWindow.maxAdr);
     }
 
     if (mode === "trend" && trendChannel) {
@@ -757,10 +836,16 @@ export function ResultDetailChart({
       addLine("#f8fafc", 2, LineStyle.Solid, signal, true);
     }
 
+    // ADX and ADR panes are never both shown at once (ADR's mode swaps
+    // completed_candles out for daily bars, so an intraday ADX pane
+    // underneath would be meaningless) - one shared "secondary pane" wire-up
+    // covers whichever of the two is active.
+    const secondaryChart = adxChart ?? adrChart;
+
     const applyRange = () => {
       if (range === "all" || source.length <= range) {
         chart.timeScale().fitContent();
-        adxChart?.timeScale().fitContent();
+        secondaryChart?.timeScale().fitContent();
         return;
       }
       const logicalRange = {
@@ -768,12 +853,12 @@ export function ResultDetailChart({
         to: source.length - 0.5 + 6,
       };
       chart.timeScale().setVisibleLogicalRange(logicalRange);
-      adxChart?.timeScale().setVisibleLogicalRange(logicalRange);
+      secondaryChart?.timeScale().setVisibleLogicalRange(logicalRange);
     };
     applyRange();
     resetViewRef.current = () => {
       candleSeries.priceScale().applyOptions({ autoScale: true });
-      adxChart?.priceScale("right").applyOptions({ autoScale: true });
+      secondaryChart?.priceScale("right").applyOptions({ autoScale: true });
       applyRange();
     };
 
@@ -790,15 +875,15 @@ export function ResultDetailChart({
       target.timeScale().setVisibleLogicalRange(logicalRange);
       syncingTimeScale = false;
     };
-    const syncMainTimeToAdx = adxChart ? syncVisibleTimeRange(adxChart) : null;
-    const syncAdxTimeToMain = syncVisibleTimeRange(chart);
-    const syncMainLogicalToAdx = adxChart ? syncVisibleLogicalRange(adxChart) : null;
-    const syncAdxLogicalToMain = syncVisibleLogicalRange(chart);
-    if (adxChart && syncMainTimeToAdx && syncMainLogicalToAdx) {
-      chart.timeScale().subscribeVisibleTimeRangeChange(syncMainTimeToAdx);
-      adxChart.timeScale().subscribeVisibleTimeRangeChange(syncAdxTimeToMain);
-      chart.timeScale().subscribeVisibleLogicalRangeChange(syncMainLogicalToAdx);
-      adxChart.timeScale().subscribeVisibleLogicalRangeChange(syncAdxLogicalToMain);
+    const syncMainTimeToSecondary = secondaryChart ? syncVisibleTimeRange(secondaryChart) : null;
+    const syncSecondaryTimeToMain = syncVisibleTimeRange(chart);
+    const syncMainLogicalToSecondary = secondaryChart ? syncVisibleLogicalRange(secondaryChart) : null;
+    const syncSecondaryLogicalToMain = syncVisibleLogicalRange(chart);
+    if (secondaryChart && syncMainTimeToSecondary && syncMainLogicalToSecondary) {
+      chart.timeScale().subscribeVisibleTimeRangeChange(syncMainTimeToSecondary);
+      secondaryChart.timeScale().subscribeVisibleTimeRangeChange(syncSecondaryTimeToMain);
+      chart.timeScale().subscribeVisibleLogicalRangeChange(syncMainLogicalToSecondary);
+      secondaryChart.timeScale().subscribeVisibleLogicalRangeChange(syncSecondaryLogicalToMain);
     }
 
     chart.subscribeCrosshairMove((parameter) => {
@@ -812,7 +897,7 @@ export function ResultDetailChart({
         setCandleTooltip(null);
       }
     });
-    adxChart?.subscribeCrosshairMove((parameter) => {
+    secondaryChart?.subscribeCrosshairMove((parameter) => {
       setHoveredTime(parameter.time === undefined ? null : unixTime(parameter.time));
     });
 
@@ -821,25 +906,25 @@ export function ResultDetailChart({
       if (width) {
         const nextWidth = Math.floor(width);
         chart.applyOptions({ width: nextWidth });
-        adxChart?.applyOptions({ width: nextWidth });
+        secondaryChart?.applyOptions({ width: nextWidth });
       }
     });
     observer.observe(host);
 
     return () => {
-      if (adxChart && syncMainTimeToAdx && syncMainLogicalToAdx) {
-        chart.timeScale().unsubscribeVisibleTimeRangeChange(syncMainTimeToAdx);
-        adxChart.timeScale().unsubscribeVisibleTimeRangeChange(syncAdxTimeToMain);
-        chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMainLogicalToAdx);
-        adxChart.timeScale().unsubscribeVisibleLogicalRangeChange(syncAdxLogicalToMain);
+      if (secondaryChart && syncMainTimeToSecondary && syncMainLogicalToSecondary) {
+        chart.timeScale().unsubscribeVisibleTimeRangeChange(syncMainTimeToSecondary);
+        secondaryChart.timeScale().unsubscribeVisibleTimeRangeChange(syncSecondaryTimeToMain);
+        chart.timeScale().unsubscribeVisibleLogicalRangeChange(syncMainLogicalToSecondary);
+        secondaryChart.timeScale().unsubscribeVisibleLogicalRangeChange(syncSecondaryLogicalToMain);
       }
       observer.disconnect();
       resetViewRef.current = () => undefined;
-      adxChart?.remove();
+      secondaryChart?.remove();
       chart.remove();
       setCandleTooltip(null);
     };
-  }, [adxPoints, adxThreshold, adxTopLevel, candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, showAdxPane, source, timeZone, timeframe, trendChannel]);
+  }, [adrWindow, adxPoints, adxThreshold, adxTopLevel, candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, showAdrPane, showAdxPane, source, timeZone, timeframe, trendChannel]);
 
   if (!completedCandles.length) {
     return (
@@ -957,6 +1042,16 @@ export function ResultDetailChart({
               LinReg Candles
             </button>
           ) : null}
+          {showAdrChart ? (
+            <button
+              type="button"
+              onClick={() => setMode("adr")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "adr" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              ADR $
+            </button>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-1">
@@ -987,6 +1082,20 @@ export function ResultDetailChart({
         </div>
       ) : null}
 
+      {mode === "adr" && adrWindow ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#20232a] bg-[#0d1014] px-3 py-2 text-[11px]">
+          <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1" style={{ color: ADR_HIGHLIGHT_COLOR }}>
+            {adrWindow.lookbackDays}-day ADR: ${adrWindow.adr.toFixed(2)} ({adrThresholdLabel(adrWindow)})
+          </span>
+          <span className={`rounded border border-[#2a2e39] px-2 py-1 ${adrWindow.passed ? "text-[#089981]" : "text-[#f23645]"}`}>
+            {adrWindow.passed ? "Passed" : "Did not pass"}
+          </span>
+          <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1 text-[#9ca3af]">
+            Always calculated from completed 1-Day candles, independent of the scan&apos;s own timeframe.
+          </span>
+        </div>
+      ) : null}
+
       <div className="min-h-10 border-b border-[#20232a] px-3 py-1.5 font-mono text-[11px]">
         {selected ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -996,6 +1105,11 @@ export function ResultDetailChart({
             <span>L <b className="font-normal text-white">{formatPrice(selected.low, precision)}</b></span>
             <span>C <b className={selected.close >= selected.open ? "font-normal text-[#089981]" : "font-normal text-[#f23645]"}>{formatPrice(selected.close, precision)}</b></span>
             {selected.volume != null ? <span>Vol <b className="font-normal text-white">{compactVolume(selected.volume)}</b></span> : null}
+            {selectedAdrRange != null && adrWindow ? (
+              <span style={{ color: selectedAdrRange >= adrWindow.adr ? ADR_ABOVE_AVERAGE_COLOR : ADR_BELOW_AVERAGE_COLOR }}>
+                Range {formatPrice(selectedAdrRange, precision)} (avg {formatPrice(adrWindow.adr, precision)})
+              </span>
+            ) : null}
             {selectedRegression?.upper != null ? <span className="text-[#00e676]">Upper {formatPrice(selectedRegression.upper, precision)}</span> : null}
             {selectedRegression?.q3 != null ? <span className="text-[#00c853]">Q3 {formatPrice(selectedRegression.q3, precision)}</span> : null}
             {selectedRegression?.middle != null ? <span className="text-[#d1d4dc]">Middle {formatPrice(selectedRegression.middle, precision)}</span> : null}
@@ -1073,6 +1187,20 @@ export function ResultDetailChart({
         </div>
       ) : null}
 
+      {showAdrPane && adrWindow ? (
+        <div className="relative border-t border-[#2a2e39] bg-[#0b0e11]">
+          <div
+            ref={adrChartHostRef}
+            data-testid="adr-chart-canvas"
+            className="h-[170px] w-full bg-[#0b0e11]"
+          />
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
+            <span>Daily Range</span>
+            <span style={{ color: ADR_HIGHLIGHT_COLOR }}>avg {formatPrice(adrWindow.adr, precision)}</span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
         <span>
           Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset · hover an outlined candle for why it matched
@@ -1095,13 +1223,25 @@ export function ResultDetailChart({
               </span>
             </>
           ) : null}
-          {mode !== "confluence" && candleReasons.size ? (
+          {mode === "adr" && candleReasons.size ? (
+            <>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: ADR_ABOVE_AVERAGE_COLOR }} />
+                Day at/above average
+              </span>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: ADR_BELOW_AVERAGE_COLOR }} />
+                Day below average
+              </span>
+            </>
+          ) : null}
+          {mode !== "confluence" && mode !== "adr" && candleReasons.size ? (
             <span className="flex items-center gap-1.5 text-[#9ca3af]">
               <span className="h-2.5 w-2.5 border-2" style={{ borderColor: CHANNEL_RESPECT_HIGHLIGHT_COLOR }} />
               Channel Respect match
             </span>
           ) : null}
-          <span>{timeZone} · completed bars only · {source.length} bars</span>
+          <span>{timeZone} · {mode === "adr" ? "completed daily bars" : "completed bars only"} · {source.length} bars</span>
         </div>
       </div>
     </div>

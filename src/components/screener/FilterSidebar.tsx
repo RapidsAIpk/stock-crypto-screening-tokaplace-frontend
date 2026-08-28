@@ -9,6 +9,7 @@ import { IndicatorsFilter } from "./filters/IndicatorsFilter";
 import { ChannelRespectFilter } from "./filters/ChannelRespectFilter";
 import { ConfluenceFilter } from "./filters/ConfluenceFilter";
 import { PriceRangeFilter } from "./filters/PriceRangeFilter";
+import { AdrFilter } from "./filters/AdrFilter";
 import { DeadAssetsFilter } from "./filters/DeadAssetsFilter";
 import type { useScreener } from "@/hooks/useScreener";
 import { appEnv } from "@/config/env";
@@ -141,6 +142,11 @@ export function FilterSidebar({
                       />
                     </>
                   )}
+                  <AdrFilter
+                    value={state.adr}
+                    onChange={state.setAdr}
+                    assetType={state.assetType}
+                  />
                   <DeadAssetsFilter
                     value={state.deadAssets}
                     onChange={state.setDeadAssets}

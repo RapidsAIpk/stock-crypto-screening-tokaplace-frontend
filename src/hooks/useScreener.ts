@@ -12,6 +12,7 @@ import type {
   Confluence,
   PriceRange,
   DeadAssetsFilter,
+  AdrFilter,
   ScanStage,
   ScreenerDetailRequest,
   ScreenerDetailResponse,
@@ -21,8 +22,8 @@ import type {
   ScreenerResultsBulkExport,
   ScreenerResultExportEntry,
 } from "@/types/screener";
-import { DEFAULT_DEAD_ASSETS_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
-import { normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeIndicatorConfig } from "@/types/screener";
+import { DEFAULT_ADR_FILTER, DEFAULT_DEAD_ASSETS_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
+import { adrFilterError, normalizeAdrFilter, normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeIndicatorConfig } from "@/types/screener";
 import type { FilterSnapshot } from "@/hooks/useUserSettings";
 import { useScanProgress } from "@/hooks/useScanProgress";
 import { appEnv } from "@/config/env";
@@ -292,6 +293,9 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
   const [deadAssets, setDeadAssets] =
     useState<DeadAssetsFilter | null>(DEFAULT_DEAD_ASSETS_FILTER);
 
+  const [adr, setAdr] =
+    useState<AdrFilter | null>(null);
+
 
   // -------------------------------------------------------
   // RESULT STATE
@@ -486,6 +490,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
           : null,
       price_range: priceRange,
       dead_assets: normalizeDeadAssetsFilter(deadAssets),
+      adr: normalizeAdrFilter(adr),
     };
   }
 
@@ -553,6 +558,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     confluence,
     priceRange,
     deadAssets,
+    adr,
   }), [
     assetType,
     complianceStatus,
@@ -571,6 +577,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     confluence,
     priceRange,
     deadAssets,
+    adr,
   ]);
 
 
@@ -609,6 +616,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
         snap.deadAssets !== undefined ? snap.deadAssets : DEFAULT_DEAD_ASSETS_FILTER,
       ),
     );
+    setAdr(normalizeAdrFilter(snap.adr ?? null));
 
     resetGateEntry();
     setResults([]);
@@ -641,6 +649,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     confluence,
     priceRange,
     deadAssets,
+    adr,
     sanitizeIndicators
   ]);
 
@@ -798,26 +807,37 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     }
   }, []);
 
+  // The backend rejects a contradictory ADR config with a 422; surface the
+  // same rule here so the user gets the actual reason instead.
+  const assertValidAdrFilter = useCallback((body: ScreenerRequest) => {
+    const error = adrFilterError(body.adr);
+    if (error) {
+      throw new Error(`Average Daily Range ($) filter: ${error}`);
+    }
+  }, []);
+
   const buildGateBody = useCallback(() => {
     const body = buildRequest();
     body.timeframe_mode = "gate_entry";
     assertNoLeftoverSingleScopeIndicators(body);
+    assertValidAdrFilter(body);
     body.indicators = body.indicators.filter(
       i => i.timeframe === "primary"
     );
     return body;
-  }, [assertNoLeftoverSingleScopeIndicators, buildRequest]);
+  }, [assertNoLeftoverSingleScopeIndicators, assertValidAdrFilter, buildRequest]);
 
   const buildEntryBody = useCallback((sessionId: string) => {
     const body = buildRequest();
     body.timeframe_mode = "gate_entry";
     assertNoLeftoverSingleScopeIndicators(body);
+    assertValidAdrFilter(body);
     body.indicators = body.indicators.filter(
       i => i.timeframe === "secondary"
     );
     body.gate_session_id = sessionId;
     return body;
-  }, [assertNoLeftoverSingleScopeIndicators, buildRequest]);
+  }, [assertNoLeftoverSingleScopeIndicators, assertValidAdrFilter, buildRequest]);
 
 
   // -------------------------------------------------------
@@ -840,6 +860,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
 
       const body = buildRequest();
       body.timeframe_mode = "single";
+      assertValidAdrFilter(body);
 
       const data = await callAPI<{ results?: ScreenerResult[] }>("run", body, { scanId });
 
@@ -873,7 +894,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
 
     }
 
-  }, [beginScan, buildRequest, endScan, singleTimeframe]);
+  }, [assertValidAdrFilter, beginScan, buildRequest, endScan, singleTimeframe]);
 
 
   // -------------------------------------------------------
@@ -1290,6 +1311,12 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     deadAssets,
     setDeadAssets: (v: DeadAssetsFilter | null) => {
       setDeadAssets(normalizeDeadAssetsFilter(v));
+      resetGateEntry();
+    },
+
+    adr,
+    setAdr: (v: AdrFilter | null) => {
+      setAdr(v);
       resetGateEntry();
     },
 

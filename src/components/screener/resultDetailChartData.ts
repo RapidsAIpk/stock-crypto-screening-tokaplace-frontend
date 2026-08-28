@@ -369,6 +369,103 @@ export interface CandleMatchReason {
   detail: string;
 }
 
+export const ADR_HIGHLIGHT_COLOR = "#38bdf8";
+export const ADR_ABOVE_AVERAGE_COLOR = "#22c55e";
+export const ADR_BELOW_AVERAGE_COLOR = "#f97316";
+
+export interface AdrChartWindow {
+  candles: MarketCandle[];
+  ranges: number[];
+  adr: number;
+  lookbackDays: number;
+  condition: "gte" | "lte" | "between";
+  minAdr: number | null;
+  maxAdr: number | null;
+  passed: boolean;
+}
+
+function adrCondition(value: unknown): "gte" | "lte" | "between" {
+  const normalized = String(value ?? "gte").trim().toLowerCase();
+  return normalized === "lte" || normalized === "between" ? normalized : "gte";
+}
+
+/**
+ * The completed daily candles the ADR average was actually taken over.
+ *
+ * ADR is a daily-only measure by spec, so it is deliberately NOT drawn on the
+ * scan's own timeframe candles - the backend ships the exact lookback window
+ * it averaged, and the chart plots those bars instead.
+ */
+export function normalizeAdrChartWindow(
+  filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
+): AdrChartWindow | null {
+  const detail = filterDetails.find((item) => item.name === "adr");
+  if (!detail || detail.details?.applied === false) return null;
+
+  const adr = finiteNumber(detail.details?.adr);
+  const rawCandles = detail.details?.daily_candles;
+  if (adr === null || !Array.isArray(rawCandles) || rawCandles.length === 0) return null;
+
+  const candles = normalizeMarketCandles(rawCandles as Array<Record<string, unknown>>);
+  if (!candles.length) return null;
+
+  const lookbackDays = finiteNumber(detail.details?.lookback_days) ?? candles.length;
+
+  return {
+    candles,
+    ranges: candles.map((candle) => candle.high - candle.low),
+    adr,
+    lookbackDays: Math.trunc(lookbackDays),
+    condition: adrCondition(detail.details?.condition),
+    minAdr: finiteNumber(detail.details?.min_adr),
+    maxAdr: finiteNumber(detail.details?.max_adr),
+    passed: Boolean(detail.passed),
+  };
+}
+
+function formatDollars(value: number | null): string {
+  return value === null ? "n/a" : `$${value.toFixed(2)}`;
+}
+
+export function adrThresholdLabel(window: AdrChartWindow): string {
+  if (window.condition === "gte") return `minimum ${formatDollars(window.minAdr)}`;
+  if (window.condition === "lte") return `maximum ${formatDollars(window.maxAdr)}`;
+  return `${formatDollars(window.minAdr)} – ${formatDollars(window.maxAdr)}`;
+}
+
+/**
+ * Every candle in the lookback window is evidence for ADR - the average is
+ * taken over all of them, so all of them are highlighted. The per-candle
+ * tooltip carries that day's own High-Low range and how it sits against the
+ * average, which is what actually explains the number.
+ */
+export function resolveAdrCandleReasons(
+  window: AdrChartWindow | null,
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+  if (!window) return reasons;
+
+  const thresholdLabel = adrThresholdLabel(window);
+
+  window.candles.forEach((candle, index) => {
+    const candleRange = window.ranges[index];
+    const aboveAverage = candleRange >= window.adr;
+
+    addCandleReason(reasons, candle.time, {
+      color: aboveAverage ? ADR_ABOVE_AVERAGE_COLOR : ADR_BELOW_AVERAGE_COLOR,
+      label: `Day ${index + 1} of ${window.lookbackDays} — range ${formatDollars(candleRange)}`,
+      detail: (
+        `High ${formatDollars(candle.high)} − Low ${formatDollars(candle.low)} = `
+        + `${formatDollars(candleRange)}, ${aboveAverage ? "at or above" : "below"} the `
+        + `${window.lookbackDays}-day average of ${formatDollars(window.adr)} `
+        + `(${thresholdLabel}).`
+      ),
+    });
+  });
+
+  return reasons;
+}
+
 const CONFLUENCE_SCENARIO_LABELS: Record<string, string> = {
   dual_support: "Dual Support",
   stacked_support: "Stacked Support",

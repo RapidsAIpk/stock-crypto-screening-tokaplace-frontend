@@ -116,6 +116,32 @@ export interface PriceRange {
   max_price?: number | null;
 }
 
+export type AdrCondition = "gte" | "lte" | "between";
+
+export const ADR_CONDITION_LABELS: Record<AdrCondition, string> = {
+  gte: "Greater Than or Equal To",
+  lte: "Less Than or Equal To",
+  between: "Between Minimum and Maximum",
+};
+
+export interface AdrFilter {
+  enabled: boolean;
+  lookback_days: number;
+  condition: AdrCondition;
+  min_adr: number | null;
+  max_adr: number | null;
+  apply_to_crypto: boolean;
+}
+
+export const DEFAULT_ADR_FILTER: AdrFilter = {
+  enabled: true,
+  lookback_days: 14,
+  condition: "gte",
+  min_adr: 0.6,
+  max_adr: null,
+  apply_to_crypto: false,
+};
+
 export type DeadTrendType =
   | "strong_dead_trend"
   | "slow_bleeding_trend"
@@ -188,6 +214,7 @@ export interface ScreenerRequest {
   confluence: Confluence | null;
   price_range: PriceRange | null;
   dead_assets: DeadAssetsFilter | null;
+  adr: AdrFilter | null;
 }
 
 export interface ScreenerResult {
@@ -1706,6 +1733,61 @@ export function normalizeDeadAssetsFilter(
   return {
     ...filter,
     dead_trend_types: ALL_DEAD_TREND_TYPES.filter((type) => selected.has(type)),
+  };
+}
+
+/**
+ * Backend-side validation rules, mirrored so the sidebar can block an invalid
+ * scan before it is sent (spec 6.5: "show a validation error and do not run
+ * the filter until corrected"). Returns null when the config is usable.
+ */
+export function adrFilterError(filter: AdrFilter | null): string | null {
+  if (!filter || !filter.enabled) {
+    return null;
+  }
+
+  if (!Number.isFinite(filter.lookback_days) || filter.lookback_days < 1) {
+    return "Lookback Days must be a whole number of at least 1.";
+  }
+  if (filter.min_adr !== null && filter.min_adr < 0) {
+    return "Minimum ADR cannot be negative.";
+  }
+  if (filter.max_adr !== null && filter.max_adr < 0) {
+    return "Maximum ADR cannot be negative.";
+  }
+
+  if (filter.condition === "gte" && filter.min_adr === null) {
+    return "Minimum ADR is required for “Greater Than or Equal To”.";
+  }
+  if (filter.condition === "lte" && filter.max_adr === null) {
+    return "Maximum ADR is required for “Less Than or Equal To”.";
+  }
+  if (filter.condition === "between") {
+    if (filter.min_adr === null || filter.max_adr === null) {
+      return "Between requires both a Minimum and a Maximum ADR.";
+    }
+    if (filter.min_adr > filter.max_adr) {
+      return "Minimum ADR cannot be greater than Maximum ADR.";
+    }
+  }
+
+  return null;
+}
+
+export function normalizeAdrFilter(filter: AdrFilter | null): AdrFilter | null {
+  if (!filter) {
+    return null;
+  }
+
+  const lookback = Math.trunc(Number(filter.lookback_days));
+
+  return {
+    ...filter,
+    lookback_days: Number.isFinite(lookback) && lookback >= 1 ? lookback : DEFAULT_ADR_FILTER.lookback_days,
+    // A maximum is meaningless for a pure minimum condition (and vice versa);
+    // dropping it keeps the outgoing request matching what the user sees.
+    min_adr: filter.condition === "lte" ? null : filter.min_adr,
+    max_adr: filter.condition === "gte" ? null : filter.max_adr,
   };
 }
 
