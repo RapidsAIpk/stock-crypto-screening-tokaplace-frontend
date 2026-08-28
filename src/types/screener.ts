@@ -142,6 +142,30 @@ export const DEFAULT_ADR_FILTER: AdrFilter = {
   apply_to_crypto: false,
 };
 
+export type GapDirection = "both" | "up" | "down";
+
+export const GAP_DIRECTION_LABELS: Record<GapDirection, string> = {
+  both: "Both",
+  up: "Gap Up Only",
+  down: "Gap Down Only",
+};
+
+export interface GapExclusionFilter {
+  enabled: boolean;
+  lookback_days: number;
+  direction: GapDirection;
+  min_gap_pct: number;
+  max_gaps: number;
+}
+
+export const DEFAULT_GAP_EXCLUSION_FILTER: GapExclusionFilter = {
+  enabled: true,
+  lookback_days: 60,
+  direction: "both",
+  min_gap_pct: 5,
+  max_gaps: 2,
+};
+
 export type DeadTrendType =
   | "strong_dead_trend"
   | "slow_bleeding_trend"
@@ -215,6 +239,7 @@ export interface ScreenerRequest {
   price_range: PriceRange | null;
   dead_assets: DeadAssetsFilter | null;
   adr: AdrFilter | null;
+  gap_exclusion: GapExclusionFilter | null;
 }
 
 export interface ScreenerResult {
@@ -1788,6 +1813,53 @@ export function normalizeAdrFilter(filter: AdrFilter | null): AdrFilter | null {
     // dropping it keeps the outgoing request matching what the user sees.
     min_adr: filter.condition === "lte" ? null : filter.min_adr,
     max_adr: filter.condition === "gte" ? null : filter.max_adr,
+  };
+}
+
+/**
+ * Backend-side validation rules, mirrored so the sidebar can block an invalid
+ * scan before it is sent. Returns null when the config is usable.
+ */
+export function gapExclusionFilterError(filter: GapExclusionFilter | null): string | null {
+  if (!filter || !filter.enabled) {
+    return null;
+  }
+
+  if (!Number.isFinite(filter.lookback_days) || filter.lookback_days < 2) {
+    return "Lookback Trading Days must be a whole number of at least 2.";
+  }
+  if (!Number.isFinite(filter.min_gap_pct) || filter.min_gap_pct < 0) {
+    return "Minimum Empty Gap Size (%) cannot be negative.";
+  }
+  if (!Number.isFinite(filter.max_gaps) || filter.max_gaps < 0) {
+    return "Maximum Allowed Qualifying Gaps cannot be negative.";
+  }
+
+  return null;
+}
+
+export function normalizeGapExclusionFilter(
+  filter: GapExclusionFilter | null,
+): GapExclusionFilter | null {
+  if (!filter) {
+    return null;
+  }
+
+  const lookback = Math.trunc(Number(filter.lookback_days));
+  const maxGaps = Math.trunc(Number(filter.max_gaps));
+  const minGapPct = Number(filter.min_gap_pct);
+
+  return {
+    ...filter,
+    lookback_days: Number.isFinite(lookback) && lookback >= 2
+      ? lookback
+      : DEFAULT_GAP_EXCLUSION_FILTER.lookback_days,
+    max_gaps: Number.isFinite(maxGaps) && maxGaps >= 0
+      ? maxGaps
+      : DEFAULT_GAP_EXCLUSION_FILTER.max_gaps,
+    min_gap_pct: Number.isFinite(minGapPct) && minGapPct >= 0
+      ? minGapPct
+      : DEFAULT_GAP_EXCLUSION_FILTER.min_gap_pct,
   };
 }
 

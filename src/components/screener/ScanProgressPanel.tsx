@@ -14,6 +14,7 @@ const STAGE_LABELS: Record<string, string> = {
   price_range: "Price range filter",
   dead_assets: "Dead assets filter",
   adr: "Average daily range filter",
+  gap_exclusion: "Gap exclusion filter",
   indicators: "Evaluating indicators",
   channel_respect: "Channel respect",
   confluence: "Confluence",

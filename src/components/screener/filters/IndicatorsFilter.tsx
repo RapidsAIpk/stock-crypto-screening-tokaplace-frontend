@@ -925,9 +925,11 @@ export function IndicatorsFilter({
                                             <div className="pl-6">
                                               <PresetOrCustomField
                                                 label="Candles Since Event"
-                                                value={(selected?.candles_since as number) ?? 0}
+                                                value={(selected?.candles_since as number | null | undefined) ?? null}
                                                 presets={[0, 1, 2, 3, 5, 10]}
                                                 suffix=" candles ago"
+                                                allowEmpty
+                                                emptyLabel="Any (default)"
                                                 onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { candles_since: v })}
                                               />
                                             </div>
@@ -936,8 +938,10 @@ export function IndicatorsFilter({
                                             <div className="pl-6">
                                               <PresetOrCustomField
                                                 label="Distance / Closeness (indicator points)"
-                                                value={(selected?.distance as number) ?? 1}
+                                                value={(selected?.distance as number | null | undefined) ?? null}
                                                 presets={[0.5, 1, 2, 3, 5]}
+                                                allowEmpty
+                                                emptyLabel="Any (default)"
                                                 onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { distance: v })}
                                               />
                                             </div>

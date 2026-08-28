@@ -13,6 +13,7 @@ import type {
   PriceRange,
   DeadAssetsFilter,
   AdrFilter,
+  GapExclusionFilter,
   ScanStage,
   ScreenerDetailRequest,
   ScreenerDetailResponse,
@@ -22,8 +23,8 @@ import type {
   ScreenerResultsBulkExport,
   ScreenerResultExportEntry,
 } from "@/types/screener";
-import { DEFAULT_ADR_FILTER, DEFAULT_DEAD_ASSETS_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
-import { adrFilterError, normalizeAdrFilter, normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeIndicatorConfig } from "@/types/screener";
+import { DEFAULT_ADR_FILTER, DEFAULT_DEAD_ASSETS_FILTER, DEFAULT_GAP_EXCLUSION_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
+import { adrFilterError, gapExclusionFilterError, normalizeAdrFilter, normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeGapExclusionFilter, normalizeIndicatorConfig } from "@/types/screener";
 import type { FilterSnapshot } from "@/hooks/useUserSettings";
 import { useScanProgress } from "@/hooks/useScanProgress";
 import { appEnv } from "@/config/env";
@@ -296,6 +297,13 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
   const [adr, setAdr] =
     useState<AdrFilter | null>(null);
 
+  // Gap Exclusion (Phase 5) is on hold per M3-ISS-05: the UI is removed from
+  // the frontend while the back end keeps its implementation. The state stays
+  // wired so re-adding the panel is a one-line change, but nothing can set it,
+  // so `gap_exclusion` always leaves here as null.
+  const [gapExclusion, setGapExclusion] =
+    useState<GapExclusionFilter | null>(null);
+
 
   // -------------------------------------------------------
   // RESULT STATE
@@ -491,6 +499,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       price_range: priceRange,
       dead_assets: normalizeDeadAssetsFilter(deadAssets),
       adr: normalizeAdrFilter(adr),
+      gap_exclusion: normalizeGapExclusionFilter(gapExclusion),
     };
   }
 
@@ -559,6 +568,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     priceRange,
     deadAssets,
     adr,
+    gapExclusion,
   }), [
     assetType,
     complianceStatus,
@@ -578,6 +588,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     priceRange,
     deadAssets,
     adr,
+    gapExclusion,
   ]);
 
 
@@ -617,6 +628,8 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       ),
     );
     setAdr(normalizeAdrFilter(snap.adr ?? null));
+    // Deliberately ignores snap.gapExclusion - see the on-hold note above.
+    setGapExclusion(null);
 
     resetGateEntry();
     setResults([]);
@@ -650,6 +663,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     priceRange,
     deadAssets,
     adr,
+    gapExclusion,
     sanitizeIndicators
   ]);
 
@@ -816,28 +830,37 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     }
   }, []);
 
+  const assertValidGapExclusionFilter = useCallback((body: ScreenerRequest) => {
+    const error = gapExclusionFilterError(body.gap_exclusion);
+    if (error) {
+      throw new Error(`Repeated Gap Exclusion filter: ${error}`);
+    }
+  }, []);
+
   const buildGateBody = useCallback(() => {
     const body = buildRequest();
     body.timeframe_mode = "gate_entry";
     assertNoLeftoverSingleScopeIndicators(body);
     assertValidAdrFilter(body);
+    assertValidGapExclusionFilter(body);
     body.indicators = body.indicators.filter(
       i => i.timeframe === "primary"
     );
     return body;
-  }, [assertNoLeftoverSingleScopeIndicators, assertValidAdrFilter, buildRequest]);
+  }, [assertNoLeftoverSingleScopeIndicators, assertValidAdrFilter, assertValidGapExclusionFilter, buildRequest]);
 
   const buildEntryBody = useCallback((sessionId: string) => {
     const body = buildRequest();
     body.timeframe_mode = "gate_entry";
     assertNoLeftoverSingleScopeIndicators(body);
     assertValidAdrFilter(body);
+    assertValidGapExclusionFilter(body);
     body.indicators = body.indicators.filter(
       i => i.timeframe === "secondary"
     );
     body.gate_session_id = sessionId;
     return body;
-  }, [assertNoLeftoverSingleScopeIndicators, assertValidAdrFilter, buildRequest]);
+  }, [assertNoLeftoverSingleScopeIndicators, assertValidAdrFilter, assertValidGapExclusionFilter, buildRequest]);
 
 
   // -------------------------------------------------------
@@ -861,6 +884,8 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
       const body = buildRequest();
       body.timeframe_mode = "single";
       assertValidAdrFilter(body);
+      assertValidGapExclusionFilter(body);
+    assertValidGapExclusionFilter(body);
 
       const data = await callAPI<{ results?: ScreenerResult[] }>("run", body, { scanId });
 
@@ -894,7 +919,7 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
 
     }
 
-  }, [assertValidAdrFilter, beginScan, buildRequest, endScan, singleTimeframe]);
+  }, [assertValidAdrFilter, assertValidGapExclusionFilter, beginScan, buildRequest, endScan, singleTimeframe]);
 
 
   // -------------------------------------------------------
@@ -1317,6 +1342,12 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
     adr,
     setAdr: (v: AdrFilter | null) => {
       setAdr(v);
+      resetGateEntry();
+    },
+
+    gapExclusion,
+    setGapExclusion: (v: GapExclusionFilter | null) => {
+      setGapExclusion(v);
       resetGateEntry();
     },
 

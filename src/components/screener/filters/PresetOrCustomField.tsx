@@ -6,12 +6,18 @@ const inputClass =
 
 interface PresetOrCustomProps {
   label: string;
-  value: number;
+  value: number | null;
   presets: number[];
   suffix?: string;
   disabled?: boolean;
   usedBy?: string;
-  onChange: (v: number) => void;
+  // When set, clearing the custom input is a valid end state: it commits null
+  // (= "not set", the caller/back end falls back to its own default) instead
+  // of snapping the field back to 0. Without it the client cannot delete the
+  // last digit at all - blur re-renders the committed number over the blank.
+  allowEmpty?: boolean;
+  emptyLabel?: string;
+  onChange: (v: number | null) => void;
 }
 
 export function PresetOrCustomField({
@@ -21,44 +27,58 @@ export function PresetOrCustomField({
   suffix,
   disabled = false,
   usedBy,
+  allowEmpty = false,
+  emptyLabel = "Any",
   onChange,
 }: PresetOrCustomProps) {
-  const matchesPreset = presets.includes(value);
-  const [forceCustom, setForceCustom] = useState(!matchesPreset);
-  const showCustom = forceCustom || !matchesPreset;
+  const matchesPreset = value !== null && presets.includes(value);
+  const isUnset = value === null && allowEmpty;
+  const [forceCustom, setForceCustom] = useState(!matchesPreset && !isUnset);
+  const showCustom = forceCustom || (!matchesPreset && !isUnset);
 
   // Raw text typed into the custom input, tracked separately from the numeric
   // `value` prop. Previously onChange called `Number(e.target.value) || 0` on
   // every keystroke, which - combined with callers clamping to their own
   // minimum, e.g. `Math.max(1, v)` - made the field snap back to that floor
   // the instant it was cleared, before a replacement digit could be typed.
-  // Typing is now free; the value only commits on blur, same as before
-  // (empty still resolves through 0, so each caller's own `Math.max` still
-  // lands it on the right floor - it just doesn't fire on every keystroke).
-  const [rawText, setRawText] = useState(String(value));
+  // Typing is now free; the value only commits on blur.
+  const [rawText, setRawText] = useState(value === null ? "" : String(value));
 
   useEffect(() => {
-    setRawText(String(value));
+    setRawText(value === null ? "" : String(value));
   }, [value]);
 
   const commitRawText = () => {
-    const parsed = rawText.trim() === "" ? 0 : Number(rawText);
+    if (rawText.trim() === "") {
+      // Empty resolves through 0 for callers that don't opt into null, so each
+      // caller's own `Math.max` still lands it on the right floor.
+      onChange(allowEmpty ? null : 0);
+      return;
+    }
+    const parsed = Number(rawText);
     if (Number.isFinite(parsed)) {
       onChange(parsed);
     } else {
-      setRawText(String(value));
+      setRawText(value === null ? "" : String(value));
     }
   };
+
+  const selectValue = showCustom ? "custom" : value === null ? "" : String(value);
 
   return (
     <div className={`space-y-1.5 ${disabled ? "opacity-50" : ""}`}>
       <FieldLabel info={usedBy ? `Used by: ${usedBy}` : undefined}>{label}</FieldLabel>
       <select
-        value={showCustom ? "custom" : String(value)}
+        value={selectValue}
         disabled={disabled}
         onChange={(e) => {
           if (e.target.value === "custom") {
             setForceCustom(true);
+            return;
+          }
+          if (allowEmpty && e.target.value === "") {
+            setForceCustom(false);
+            onChange(null);
             return;
           }
           setForceCustom(false);
@@ -66,6 +86,7 @@ export function PresetOrCustomField({
         }}
         className={inputClass}
       >
+        {allowEmpty && <option value="">{emptyLabel}</option>}
         {presets.map((preset) => (
           <option key={preset} value={preset}>
             {preset}
@@ -83,7 +104,7 @@ export function PresetOrCustomField({
           onChange={(e) => setRawText(e.target.value)}
           onBlur={commitRawText}
           className={inputClass}
-          placeholder="Custom value"
+          placeholder={allowEmpty ? "Leave blank for default" : "Custom value"}
         />
       )}
     </div>

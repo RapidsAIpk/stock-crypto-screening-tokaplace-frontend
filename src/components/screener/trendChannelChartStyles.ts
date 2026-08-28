@@ -145,6 +145,21 @@ function addBandFill(
   maskSeries.setData(band.lower);
 }
 
+/**
+ * Shade the area between two price series with the same fill+mask technique
+ * the trend-channel bands use. Must be called before the candlestick series is
+ * added so candles draw on top of the fill.
+ */
+export function addPriceBandFill(
+  chart: IChartApi,
+  upper: LineData<UTCTimestamp>[],
+  lower: LineData<UTCTimestamp>[],
+  fillColor: string,
+  precision: number,
+) {
+  addBandFill(chart, { upper, lower }, fillColor, precision);
+}
+
 export function addTrendChannelFills(
   chart: IChartApi,
   source: ChartCandle[],

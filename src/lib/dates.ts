@@ -77,7 +77,10 @@ export function describeLatestCandleConsidered(
 ): LatestCandleConsidered {
   const timeZone = options?.timeZone ?? DEFAULT_APP_TIMEZONE;
 
-  if (lastCandleTime === null || lastCandleTime === undefined) {
+  // A non-positive timestamp is a placeholder, not a real candle time -
+  // rendering it would print "Dec 31, 1969" (the unix epoch in local time)
+  // rather than telling the reader the candle time is unknown.
+  if (lastCandleTime === null || lastCandleTime === undefined || lastCandleTime <= 0) {
     return {
       dateLabel: "N/A",
       timeLabel: "",

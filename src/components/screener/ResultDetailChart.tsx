@@ -22,11 +22,16 @@ import {
   ADR_HIGHLIGHT_COLOR,
   adrThresholdLabel,
   CHANNEL_RESPECT_HIGHLIGHT_COLOR,
+  GAP_DOWN_FILL_COLOR,
+  GAP_DOWN_HIGHLIGHT_COLOR,
+  GAP_UP_FILL_COLOR,
+  GAP_UP_HIGHLIGHT_COLOR,
   CONFLUENCE_SOURCE_COLORS,
   createLinearRegressionCandles,
   LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
   normalizeAdrChartWindow,
   normalizeConfluenceChartSources,
+  normalizeGapChartWindow,
   normalizeLrcChannel,
   normalizeMarketCandles,
   normalizeRegressionChannel,
@@ -34,17 +39,20 @@ import {
   regressionValueAt,
   resolveAdrCandleReasons,
   resolveChannelRespectCandleReasons,
+  resolveGapCandleReasons,
   resolveChartChannelVisibility,
   resolveConfluenceCandleReasons,
   trendValueAt,
   type AdrChartWindow,
   type CandleMatchReason,
+  type GapChartWindow,
   type ChartCandle,
   type ConfluenceChartSource,
   type LinRegSettings,
   type RegressionChannelLine,
 } from "./resultDetailChartData";
 import {
+  addPriceBandFill,
   addTrendChannelFills,
   buildTrendLineData,
   TREND_BOTTOM_COLOR,
@@ -53,7 +61,7 @@ import {
   TV_BACKGROUND,
 } from "./trendChannelChartStyles";
 
-type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg" | "adr";
+type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg" | "adr" | "gap";
 type RangeOption = 20 | 50 | 100 | "all";
 type TrendyAdxPoint = {
   time: number;
@@ -93,6 +101,7 @@ const ADX_STRENGTH_COLOR = "#facc15";
 const ADX_THRESHOLD_COLOR = "#d8d800";
 const ADR_AVERAGE_LINE_COLOR = "#38bdf8";
 const ADR_THRESHOLD_LINE_COLOR = "#facc15";
+const GAP_THRESHOLD_LINE_COLOR = "#facc15";
 
 function confluenceValueAt(
   source: ConfluenceChartSource,
@@ -288,6 +297,7 @@ export function ResultDetailChart({
   const chartHostRef = useRef<HTMLDivElement>(null);
   const adxChartHostRef = useRef<HTMLDivElement>(null);
   const adrChartHostRef = useRef<HTMLDivElement>(null);
+  const gapChartHostRef = useRef<HTMLDivElement>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
   const candles = useMemo(() => normalizeMarketCandles(rawCandles), [rawCandles]);
   const completedCandles = useMemo(
@@ -304,6 +314,8 @@ export function ResultDetailChart({
   const showConfluenceChart = confluenceSources.length === 2;
   const adrWindow = useMemo(() => normalizeAdrChartWindow(filterDetails), [filterDetails]);
   const showAdrChart = Boolean(adrWindow);
+  const gapWindow = useMemo(() => normalizeGapChartWindow(filterDetails), [filterDetails]);
+  const showGapChart = Boolean(gapWindow);
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
   const adxIndicator = indicatorDetails.find((item) => item.name === "adx");
   const channelVisibility = useMemo(
@@ -355,7 +367,9 @@ export function ResultDetailChart({
         ? "linreg"
         : showAdrChart
           ? "adr"
-          : "price";
+          : showGapChart
+            ? "gap"
+            : "price";
   const [mode, setMode] = useState<ChartMode>(
     initialMode,
   );
@@ -372,6 +386,7 @@ export function ResultDetailChart({
       || (mode === "trend" && showTrendChart)
       || (mode === "linreg" && Boolean(linRegIndicator))
       || (mode === "adr" && showAdrChart)
+      || (mode === "gap" && showGapChart)
     );
     if (!modeAvailable) setMode(initialMode);
   }, [
@@ -380,6 +395,7 @@ export function ResultDetailChart({
     mode,
     showAdrChart,
     showConfluenceChart,
+    showGapChart,
     showLrcChart,
     showRegressionChart,
     showTrendChart,
@@ -391,7 +407,9 @@ export function ResultDetailChart({
     ? linRegCandles
     : mode === "adr" && adrWindow
       ? adrWindow.candles
-      : completedCandles;
+      : mode === "gap" && gapWindow
+        ? gapWindow.candles
+        : completedCandles;
   const channelRespectCandleReasons = useMemo(
     () => resolveChannelRespectCandleReasons(filterDetails, requestFilters, mode),
     [filterDetails, mode, requestFilters],
@@ -401,11 +419,14 @@ export function ResultDetailChart({
     [confluenceSources, filterDetails],
   );
   const adrCandleReasons = useMemo(() => resolveAdrCandleReasons(adrWindow), [adrWindow]);
+  const gapCandleReasons = useMemo(() => resolveGapCandleReasons(gapWindow), [gapWindow]);
   const candleReasons = mode === "confluence"
     ? confluenceCandleReasons
     : mode === "adr"
       ? adrCandleReasons
-      : channelRespectCandleReasons;
+      : mode === "gap"
+        ? gapCandleReasons
+        : channelRespectCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
@@ -424,9 +445,11 @@ export function ResultDetailChart({
   const showAdxPane = Boolean(
     adxIndicator
     && mode !== "adr"
+    && mode !== "gap"
     && adxPoints.some((point) => point.plusDi !== null || point.minusDi !== null || point.adx !== null),
   );
   const showAdrPane = mode === "adr" && Boolean(adrWindow);
+  const showGapPane = mode === "gap" && Boolean(gapWindow);
   const selectedRegression = mode === "regression" && regressionChannel && selected
     ? {
         upper: regressionValueAt(regressionChannel, "upper", selectedIndex, source.length),
@@ -467,6 +490,9 @@ export function ResultDetailChart({
   const selectedAdrRange = mode === "adr" && adrWindow
     ? adrWindow.ranges[selectedIndex] ?? null
     : null;
+  const selectedGap = mode === "gap" && gapWindow && selected
+    ? gapWindow.gaps.find((gap) => gap.time === selected.time) ?? null
+    : null;
 
   useEffect(() => {
     const host = chartHostRef.current;
@@ -494,7 +520,7 @@ export function ResultDetailChart({
       },
       leftPriceScale: { visible: false },
       timeScale: {
-        visible: !showAdxPane && !showAdrPane,
+        visible: !showAdxPane && !showAdrPane && !showGapPane,
         borderColor: TV_BORDER,
         timeVisible: true,
         secondsVisible: false,
@@ -635,6 +661,11 @@ export function ResultDetailChart({
       ? createPaneChart(adrHost, (price) => formatPrice(price, precision))
       : null;
 
+    const gapHost = gapChartHostRef.current;
+    const gapChart = showGapPane && gapHost && gapWindow
+      ? createPaneChart(gapHost, (price) => `${price.toFixed(2)}%`)
+      : null;
+
     if (adxChart) {
       const adxValues = adxPoints.flatMap((point) => [point.plusDi, point.minusDi, point.adx])
         .filter((value): value is number => value !== null && Number.isFinite(value));
@@ -730,8 +761,58 @@ export function ResultDetailChart({
       if (adrWindow.maxAdr !== null) addAdrLine(ADR_THRESHOLD_LINE_COLOR, LineStyle.Dashed, adrWindow.maxAdr);
     }
 
+    if (gapChart && gapWindow) {
+      // One bar per qualifying gap, at its size percentage, against the
+      // dashed minimum. Days with no true gap simply have no bar, so the
+      // pane reads as "how often, and how big" at a glance.
+      const gapSizeSeries = gapChart.addSeries(HistogramSeries, {
+        base: 0,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+      });
+      gapSizeSeries.setData(gapWindow.gaps.map((gap) => ({
+        time: gap.time as UTCTimestamp,
+        value: gap.sizePct,
+        color: gap.direction === "up" ? GAP_UP_HIGHLIGHT_COLOR : GAP_DOWN_HIGHLIGHT_COLOR,
+      })));
+
+      const thresholdSeries = gapChart.addSeries(LineSeries, {
+        color: GAP_THRESHOLD_LINE_COLOR,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        crosshairMarkerVisible: false,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+      });
+      thresholdSeries.setData(gapWindow.candles.map((candle) => ({
+        time: candle.time as UTCTimestamp,
+        value: gapWindow.minGapPct,
+      })));
+    }
+
     if (mode === "trend" && trendChannel) {
       addTrendChannelFills(chart, source, trendChannel, precision);
+    }
+
+    if (mode === "gap" && gapWindow) {
+      // Shade each true empty-space gap across the two sessions that created
+      // it, so the blank area itself is visible rather than merely implied.
+      gapWindow.gaps.forEach((gap) => {
+        const span = [gap.previousTime, gap.time]
+          .filter((time): time is number => time !== null)
+          .map((time) => time as UTCTimestamp);
+        if (span.length < 2) return;
+
+        addPriceBandFill(
+          chart,
+          span.map((time) => ({ time, value: gap.emptyTo })),
+          span.map((time) => ({ time, value: gap.emptyFrom })),
+          gap.direction === "up" ? GAP_UP_FILL_COLOR : GAP_DOWN_FILL_COLOR,
+          precision,
+        );
+      });
     }
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -836,11 +917,11 @@ export function ResultDetailChart({
       addLine("#f8fafc", 2, LineStyle.Solid, signal, true);
     }
 
-    // ADX and ADR panes are never both shown at once (ADR's mode swaps
-    // completed_candles out for daily bars, so an intraday ADX pane
-    // underneath would be meaningless) - one shared "secondary pane" wire-up
-    // covers whichever of the two is active.
-    const secondaryChart = adxChart ?? adrChart;
+    // The ADX, ADR and Gap panes are mutually exclusive: the ADR and Gap
+    // modes swap completed_candles out for daily bars, so an intraday ADX
+    // pane underneath either would be meaningless. One shared "secondary
+    // pane" wire-up covers whichever of the three is active.
+    const secondaryChart = adxChart ?? adrChart ?? gapChart;
 
     const applyRange = () => {
       if (range === "all" || source.length <= range) {
@@ -924,7 +1005,7 @@ export function ResultDetailChart({
       chart.remove();
       setCandleTooltip(null);
     };
-  }, [adrWindow, adxPoints, adxThreshold, adxTopLevel, candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, showAdrPane, showAdxPane, source, timeZone, timeframe, trendChannel]);
+  }, [adrWindow, adxPoints, gapWindow, adxThreshold, adxTopLevel, candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, showAdrPane, showAdxPane, showGapPane, source, timeZone, timeframe, trendChannel]);
 
   if (!completedCandles.length) {
     return (
@@ -1052,6 +1133,16 @@ export function ResultDetailChart({
               ADR $
             </button>
           ) : null}
+          {showGapChart ? (
+            <button
+              type="button"
+              onClick={() => setMode("gap")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "gap" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <CandlestickChart className="h-3.5 w-3.5" />
+              Gap Exclusion
+            </button>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-1">
@@ -1096,6 +1187,21 @@ export function ResultDetailChart({
         </div>
       ) : null}
 
+      {mode === "gap" && gapWindow ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#20232a] bg-[#0d1014] px-3 py-2 text-[11px]">
+          <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1 text-[#d1d4dc]">
+            {gapWindow.gaps.length} qualifying gap{gapWindow.gaps.length === 1 ? "" : "s"} in {gapWindow.lookbackDays} daily candles
+            {" "}(min {gapWindow.minGapPct}%, max allowed {gapWindow.maxGaps})
+          </span>
+          <span className={`rounded border border-[#2a2e39] px-2 py-1 ${gapWindow.passed ? "text-[#089981]" : "text-[#f23645]"}`}>
+            {gapWindow.passed ? "Passed" : "Excluded"}
+          </span>
+          <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1 text-[#9ca3af]">
+            Only completely blank price areas count — overlapping candles, touches and long wicks do not.
+          </span>
+        </div>
+      ) : null}
+
       <div className="min-h-10 border-b border-[#20232a] px-3 py-1.5 font-mono text-[11px]">
         {selected ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -1108,6 +1214,12 @@ export function ResultDetailChart({
             {selectedAdrRange != null && adrWindow ? (
               <span style={{ color: selectedAdrRange >= adrWindow.adr ? ADR_ABOVE_AVERAGE_COLOR : ADR_BELOW_AVERAGE_COLOR }}>
                 Range {formatPrice(selectedAdrRange, precision)} (avg {formatPrice(adrWindow.adr, precision)})
+              </span>
+            ) : null}
+            {selectedGap ? (
+              <span style={{ color: selectedGap.direction === "up" ? GAP_UP_HIGHLIGHT_COLOR : GAP_DOWN_HIGHLIGHT_COLOR }}>
+                True gap {selectedGap.direction} {selectedGap.sizePct.toFixed(2)}%
+                {" "}[{formatPrice(selectedGap.emptyFrom, precision)}–{formatPrice(selectedGap.emptyTo, precision)}]
               </span>
             ) : null}
             {selectedRegression?.upper != null ? <span className="text-[#00e676]">Upper {formatPrice(selectedRegression.upper, precision)}</span> : null}
@@ -1201,6 +1313,25 @@ export function ResultDetailChart({
         </div>
       ) : null}
 
+      {showGapPane && gapWindow ? (
+        <div className="relative border-t border-[#2a2e39] bg-[#0b0e11]">
+          <div
+            ref={gapChartHostRef}
+            data-testid="gap-chart-canvas"
+            className="h-[170px] w-full bg-[#0b0e11]"
+          />
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
+            <span>Gap Size</span>
+            <span style={{ color: GAP_THRESHOLD_LINE_COLOR }}>min {gapWindow.minGapPct}%</span>
+            {selectedGap ? (
+              <span style={{ color: selectedGap.direction === "up" ? GAP_UP_HIGHLIGHT_COLOR : GAP_DOWN_HIGHLIGHT_COLOR }}>
+                {selectedGap.sizePct.toFixed(2)}%
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e39] px-3 py-2 text-[10px] text-[#787b86]">
         <span>
           Drag chart to pan · wheel/pinch to zoom · drag either axis to rescale · double-click an axis to reset · hover an outlined candle for why it matched
@@ -1235,13 +1366,25 @@ export function ResultDetailChart({
               </span>
             </>
           ) : null}
-          {mode !== "confluence" && mode !== "adr" && candleReasons.size ? (
+          {mode === "gap" && candleReasons.size ? (
+            <>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: GAP_UP_HIGHLIGHT_COLOR }} />
+                True gap up
+              </span>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: GAP_DOWN_HIGHLIGHT_COLOR }} />
+                True gap down
+              </span>
+            </>
+          ) : null}
+          {mode !== "confluence" && mode !== "adr" && mode !== "gap" && candleReasons.size ? (
             <span className="flex items-center gap-1.5 text-[#9ca3af]">
               <span className="h-2.5 w-2.5 border-2" style={{ borderColor: CHANNEL_RESPECT_HIGHLIGHT_COLOR }} />
               Channel Respect match
             </span>
           ) : null}
-          <span>{timeZone} · {mode === "adr" ? "completed daily bars" : "completed bars only"} · {source.length} bars</span>
+          <span>{timeZone} · {mode === "adr" || mode === "gap" ? "completed daily bars" : "completed bars only"} · {source.length} bars</span>
         </div>
       </div>
     </div>

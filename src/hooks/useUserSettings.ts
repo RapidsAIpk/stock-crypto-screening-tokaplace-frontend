@@ -5,7 +5,7 @@ import { appEnv } from "@/config/env";
 import type {
   AssetType, TimeframeMode, ComplianceStatus,
   IndicatorConfig, ChannelRespect, Confluence, PriceRange, DeadAssetsFilter,
-  AdrFilter,
+  AdrFilter, GapExclusionFilter,
 } from "@/types/screener";
 
 function apiRoot(): string {
@@ -35,8 +35,9 @@ export interface FilterSnapshot {
   confluence: Confluence | null;
   priceRange: PriceRange | null;
   deadAssets: DeadAssetsFilter | null;
-  // Optional so presets saved before the ADR filter existed still load.
+  // Optional so presets saved before these filters existed still load.
   adr?: AdrFilter | null;
+  gapExclusion?: GapExclusionFilter | null;
 }
 
 export interface FilterPreset {

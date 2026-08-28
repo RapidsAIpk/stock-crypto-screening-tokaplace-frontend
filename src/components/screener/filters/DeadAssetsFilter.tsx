@@ -170,7 +170,7 @@ export function DeadAssetsFilter({ value, onChange }: Props) {
               presets={[2, 3, 4]}
               disabled={!fieldActive.lowerHighs}
               usedBy={usedByLabel(FIELD_USED_BY.lower_highs_required)}
-              onChange={(v) => update({ lower_highs_required: Math.max(1, v) })}
+              onChange={(v) => update({ lower_highs_required: Math.max(1, v ?? 1) })}
             />
             <PresetOrCustomField
               label="Lower Lows Required"
@@ -178,7 +178,7 @@ export function DeadAssetsFilter({ value, onChange }: Props) {
               presets={[2, 3, 4]}
               disabled={!fieldActive.lowerLows}
               usedBy={usedByLabel(FIELD_USED_BY.lower_lows_required)}
-              onChange={(v) => update({ lower_lows_required: Math.max(1, v) })}
+              onChange={(v) => update({ lower_lows_required: Math.max(1, v ?? 1) })}
             />
 
             <DeadAssetsSelectField
@@ -197,7 +197,7 @@ export function DeadAssetsFilter({ value, onChange }: Props) {
               suffix=" candles"
               disabled={!fieldActive.recoveryLookback}
               usedBy={usedByLabel(FIELD_USED_BY.recovery_lookback)}
-              onChange={(v) => update({ recovery_lookback: Math.max(2, v) })}
+              onChange={(v) => update({ recovery_lookback: Math.max(2, v ?? 2) })}
             />
 
             <DeadAssetsSelectField
@@ -225,7 +225,7 @@ export function DeadAssetsFilter({ value, onChange }: Props) {
               suffix="%"
               disabled={!fieldActive.bounceThreshold}
               usedBy={usedByLabel(FIELD_USED_BY.bounce_threshold_pct)}
-              onChange={(v) => update({ bounce_threshold_pct: Math.max(0.01, v) })}
+              onChange={(v) => update({ bounce_threshold_pct: Math.max(0.01, v ?? 0.01) })}
             />
             <PresetOrCustomField
               label="Failure Window"
@@ -234,7 +234,7 @@ export function DeadAssetsFilter({ value, onChange }: Props) {
               suffix=" candles"
               disabled={!fieldActive.failureWindow}
               usedBy={usedByLabel(FIELD_USED_BY.failure_window)}
-              onChange={(v) => update({ failure_window: Math.max(1, v) })}
+              onChange={(v) => update({ failure_window: Math.max(1, v ?? 1) })}
             />
 
             <div className="col-span-2">

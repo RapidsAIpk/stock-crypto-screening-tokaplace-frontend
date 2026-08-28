@@ -369,6 +369,11 @@ export interface CandleMatchReason {
   detail: string;
 }
 
+export const GAP_UP_HIGHLIGHT_COLOR = "#22d3ee";
+export const GAP_DOWN_HIGHLIGHT_COLOR = "#e879f9";
+export const GAP_UP_FILL_COLOR = "rgba(34, 211, 238, 0.28)";
+export const GAP_DOWN_FILL_COLOR = "rgba(232, 121, 249, 0.28)";
+
 export const ADR_HIGHLIGHT_COLOR = "#38bdf8";
 export const ADR_ABOVE_AVERAGE_COLOR = "#22c55e";
 export const ADR_BELOW_AVERAGE_COLOR = "#f97316";
@@ -439,6 +444,105 @@ export function adrThresholdLabel(window: AdrChartWindow): string {
  * tooltip carries that day's own High-Low range and how it sits against the
  * average, which is what actually explains the number.
  */
+export interface QualifyingGap {
+  direction: "up" | "down";
+  sizePct: number;
+  emptyFrom: number;
+  emptyTo: number;
+  time: number;
+  previousTime: number | null;
+}
+
+export interface GapChartWindow {
+  candles: MarketCandle[];
+  gaps: QualifyingGap[];
+  lookbackDays: number;
+  direction: "both" | "up" | "down";
+  minGapPct: number;
+  maxGaps: number;
+  passed: boolean;
+}
+
+/**
+ * The completed daily candles the gap count was taken across, plus every
+ * qualifying gap the backend found.
+ *
+ * Like ADR, this is a daily-only measure, so the chart plots the exact
+ * lookback window the backend evaluated rather than the scan's own candles.
+ */
+export function normalizeGapChartWindow(
+  filterDetails: Array<{ name: string; passed: boolean; details: Record<string, unknown> }> = [],
+): GapChartWindow | null {
+  const detail = filterDetails.find((item) => item.name === "gap_exclusion");
+  if (!detail || detail.details?.error) return null;
+
+  const rawCandles = detail.details?.daily_candles;
+  if (!Array.isArray(rawCandles) || rawCandles.length === 0) return null;
+
+  const candles = normalizeMarketCandles(rawCandles as Array<Record<string, unknown>>);
+  if (!candles.length) return null;
+
+  const rawGaps = Array.isArray(detail.details?.gaps)
+    ? (detail.details.gaps as Array<Record<string, unknown>>)
+    : [];
+
+  const gaps = rawGaps.flatMap((gap): QualifyingGap[] => {
+    const time = normalizedCandleTime(gap.time);
+    const emptyFrom = finiteNumber(gap.empty_from);
+    const emptyTo = finiteNumber(gap.empty_to);
+    const sizePct = finiteNumber(gap.size_pct);
+    if (time === null || emptyFrom === null || emptyTo === null || sizePct === null) return [];
+
+    return [{
+      direction: String(gap.direction) === "down" ? "down" : "up",
+      sizePct,
+      emptyFrom,
+      emptyTo,
+      time,
+      previousTime: normalizedCandleTime(gap.previous_time),
+    }];
+  });
+
+  return {
+    candles,
+    gaps,
+    lookbackDays: Math.trunc(finiteNumber(detail.details?.lookback_days) ?? candles.length),
+    direction: (() => {
+      const raw = String(detail.details?.direction ?? "both").trim().toLowerCase();
+      return raw === "up" || raw === "down" ? raw : "both";
+    })(),
+    minGapPct: finiteNumber(detail.details?.min_gap_pct) ?? 0,
+    maxGaps: Math.trunc(finiteNumber(detail.details?.max_gaps) ?? 0),
+    passed: Boolean(detail.passed),
+  };
+}
+
+/**
+ * Highlights the candle that *created* each qualifying gap - the one that
+ * opened clear of the previous session's range. The tooltip carries the exact
+ * blank price area and its size, which is what the count is built from.
+ */
+export function resolveGapCandleReasons(
+  window: GapChartWindow | null,
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+  if (!window) return reasons;
+
+  window.gaps.forEach((gap) => {
+    const isUp = gap.direction === "up";
+    addCandleReason(reasons, gap.time, {
+      color: isUp ? GAP_UP_HIGHLIGHT_COLOR : GAP_DOWN_HIGHLIGHT_COLOR,
+      label: `True Gap ${isUp ? "Up" : "Down"} — ${gap.sizePct.toFixed(2)}%`,
+      detail: (
+        `Blank price area from ${gap.emptyFrom} to ${gap.emptyTo} with no wick or body inside. `
+        + `Counted because ${gap.sizePct.toFixed(2)}% is at or above the ${window.minGapPct}% minimum.`
+      ),
+    });
+  });
+
+  return reasons;
+}
+
 export function resolveAdrCandleReasons(
   window: AdrChartWindow | null,
 ): Map<number, CandleMatchReason[]> {
