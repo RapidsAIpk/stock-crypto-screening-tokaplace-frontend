@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useScreener } from "@/hooks/useScreener";
 import {
+  DEFAULT_EMA_CONFIG,
   describeChannelRespectCandleWindow,
   getChannelRespectHistoryCandleCount,
   getChannelRespectTouchCandleCount,
@@ -30,7 +31,7 @@ describe("indicator defaults", () => {
   });
 
   it("uses TradingView-style defaults for EMA and channel indicators", () => {
-    expect(getDefaultIndicatorConfig("ema")).toMatchObject({ length: 9 });
+    expect(getDefaultIndicatorConfig("ema")).toEqual(DEFAULT_EMA_CONFIG);
     expect(getDefaultIndicatorConfig("lrc")).toMatchObject({ length: 100 });
     expect(getDefaultIndicatorConfig("regression")).toMatchObject({ length: 200 });
     expect(getDefaultIndicatorConfig("trend")).toMatchObject({
@@ -74,12 +75,204 @@ describe("indicator defaults", () => {
       normalizeIndicatorConfig({
         name: "ema",
         timeframe: "single",
-        config: { rule: "below" },
+        config: { selection_mode: "all" },
       }),
     ).toMatchObject({
       config: {
-        length: 9,
-        rule: "below",
+        periods: [9],
+        selection_mode: "all",
+        conditions: DEFAULT_EMA_CONFIG.conditions,
+      },
+    });
+  });
+
+  it("defaults channel indicator selection mode to all", () => {
+    expect(getDefaultIndicatorConfig("lrc")).toMatchObject({ selection_mode: "all" });
+    expect(getDefaultIndicatorConfig("regression")).toMatchObject({ selection_mode: "all" });
+    expect(getDefaultIndicatorConfig("trend")).toMatchObject({ selection_mode: "all" });
+  });
+
+  it("normalizes Phase 2 LRC and regression actions with candles-since ranges", () => {
+    expect(
+      normalizeIndicatorConfig({
+        name: "lrc",
+        timeframe: "single",
+        config: {
+          lines: ["lower"],
+          action: "piercing_from_below",
+        },
+      }).config,
+    ).toMatchObject({
+      lines: ["lower"],
+      action: "piercing_from_below",
+      selection_mode: "all",
+      candles_since_min: 0,
+      candles_since_max: 5,
+      window: 1,
+    });
+
+    expect(
+      normalizeIndicatorConfig({
+        name: "regression",
+        timeframe: "single",
+        config: {
+          lines: ["lower"],
+          action: "reclaimed_from_below_bullish",
+          selection_mode: "any",
+        },
+      }).config,
+    ).toMatchObject({
+      lines: ["lower"],
+      action: "reclaimed_from_below_bullish",
+      selection_mode: "any",
+      candles_since_min: 0,
+      candles_since_max: 5,
+      min_consecutive_below: 1,
+      require_still_above_now: true,
+      window: 1,
+    });
+  });
+
+  it("normalizes Phase 2 trend area actions with per-area candles-since ranges", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "trend",
+      timeframe: "single",
+      config: {
+        areas: [
+          {
+            area: "bottom_line",
+            action: "rejected_from_above_bullish",
+            window: 1,
+          },
+        ],
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      selection_mode: "all",
+      areas: [
+        {
+          area: "bottom_line",
+          action: "rejected_from_above_bullish",
+          candles_since_min: 0,
+          candles_since_max: 5,
+          window: 1,
+        },
+      ],
+    });
+  });
+
+  it("keeps old channel action window configs unchanged apart from selection mode defaulting", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "lrc",
+      timeframe: "single",
+      config: {
+        action: "touch",
+        window: 3,
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      action: "touch",
+      selection_mode: "all",
+      window: 3,
+    });
+    expect(normalized.config).not.toHaveProperty("candles_since_min");
+    expect(normalized.config).not.toHaveProperty("candles_since_max");
+  });
+
+  it("shows EMA through the custom editor instead of legacy generic fields", () => {
+    const fields = INDICATOR_DEFINITIONS.find((item) => item.name === "ema")?.fields ?? [];
+    expect(fields).toEqual([]);
+  });
+
+  it("sends the Phase 1 EMA config in the built request", async () => {
+    const { result } = renderHook(() => useScreener());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      result.current.setIndicators([
+        {
+          name: "ema",
+          timeframe: "single",
+          config: {
+            periods: [9, 20],
+            selection_mode: "any",
+            conditions: {
+              touch_from_above: {
+                enabled: true,
+                candles_since_min: 0,
+                candles_since_max: 5,
+              },
+              piercing_from_below: {
+                enabled: false,
+                candles_since_min: 0,
+                candles_since_max: 5,
+              },
+              close_above: {
+                enabled: true,
+                candles_since_min: 0,
+                candles_since_max: 0,
+              },
+              touched_or_pierced_and_closed_above: {
+                enabled: false,
+                candles_since_min: 0,
+                candles_since_max: 5,
+                require_still_above_now: true,
+              },
+            },
+          },
+        },
+      ]);
+    });
+
+    expect(result.current.buildRequest().indicators[0]).toEqual({
+      name: "ema",
+      timeframe: "single",
+      config: {
+        periods: [9, 20],
+        selection_mode: "any",
+        conditions: DEFAULT_EMA_CONFIG.conditions,
+      },
+    });
+  });
+
+  it("normalizes old EMA length and rule configs into Phase 1 conditions", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "ema",
+      timeframe: "single",
+      config: {
+        length: 20,
+        rule: "touch",
+        tolerance_pct: 0.2,
+      },
+    });
+
+    expect(normalized.config).toEqual({
+      periods: [20],
+      selection_mode: "any",
+      conditions: {
+        touch_from_above: {
+          enabled: true,
+          candles_since_min: 0,
+          candles_since_max: 5,
+        },
+        piercing_from_below: {
+          enabled: false,
+          candles_since_min: 0,
+          candles_since_max: 5,
+        },
+        close_above: {
+          enabled: false,
+          candles_since_min: 0,
+          candles_since_max: 0,
+        },
+        touched_or_pierced_and_closed_above: {
+          enabled: false,
+          candles_since_min: 0,
+          candles_since_max: 5,
+          require_still_above_now: true,
+        },
       },
     });
   });
@@ -398,6 +591,92 @@ describe("indicator defaults", () => {
       mode: "bullish",
       conditions: [{ id: "adx_above_20" }],
     });
+  });
+
+  it("normalizes Trendy ADX direction conditions for the Phase 3 payload", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        window: 4,
+        min_history: 240,
+        conditions: [
+          {
+            id: "di_plus_direction",
+            direction: "up",
+            candles_since_direction_change_min: 1,
+            candles_since_direction_change_max: 3,
+          },
+          { id: "adx_direction" },
+        ],
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      window: 4,
+      min_history: 240,
+      conditions: [
+        {
+          id: "di_plus_direction",
+          direction: "up",
+          candles_since_direction_change_min: 1,
+          candles_since_direction_change_max: 3,
+        },
+        {
+          id: "adx_direction",
+          direction: "any",
+          candles_since_direction_change_min: 0,
+          candles_since_direction_change_max: 5,
+        },
+      ],
+    });
+  });
+
+  it("normalizes Trendy ADX event and active ranges without reusing window", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        window: 7,
+        min_history: 300,
+        conditions: [
+          { id: "adx_crossed_above_20", candles_since_min: 2, candles_since_max: 6 },
+          { id: "adx_above_25", active_candles_min: 3, active_candles_max: 8 },
+        ],
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      window: 7,
+      min_history: 300,
+      conditions: [
+        { id: "adx_crossed_above_20", candles_since_min: 2, candles_since_max: 6 },
+        { id: "adx_above_25", active_candles_min: 3, active_candles_max: 8 },
+      ],
+    });
+  });
+
+  it("converts legacy Trendy ADX candles_since by condition category", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "adx",
+      timeframe: "single",
+      config: {
+        mode: "bullish",
+        conditions: [
+          { id: "di_crossed_above", candles_since: 4 },
+          { id: "di_already_above", candles_since: 6 },
+          { id: "di_near_cross", distance: 2 },
+        ],
+      },
+    });
+
+    expect(normalized.config.conditions).toEqual([
+      { id: "di_crossed_above", candles_since_min: 0, candles_since_max: 4 },
+      { id: "di_already_above", active_candles_min: 6, active_candles_max: null },
+      { id: "di_near_cross", distance: 2 },
+    ]);
   });
 
   it("uses TradingView-style defaults for Relative Volume", () => {

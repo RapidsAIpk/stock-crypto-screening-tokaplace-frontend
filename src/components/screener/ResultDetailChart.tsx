@@ -22,6 +22,10 @@ import {
   ADR_HIGHLIGHT_COLOR,
   adrThresholdLabel,
   CHANNEL_RESPECT_HIGHLIGHT_COLOR,
+  INTERACTION_BELOW_COLOR,
+  INTERACTION_CONTEXT_COLOR,
+  INTERACTION_EVENT_COLOR,
+  INTERACTION_STILL_ABOVE_COLOR,
   GAP_DOWN_FILL_COLOR,
   GAP_DOWN_HIGHLIGHT_COLOR,
   GAP_UP_FILL_COLOR,
@@ -38,6 +42,8 @@ import {
   normalizeTrendChannel,
   regressionValueAt,
   resolveAdrCandleReasons,
+  resolveChannelInteractionCandleReasons,
+  resolveChannelInteractionSummaries,
   resolveChannelRespectCandleReasons,
   resolveGapCandleReasons,
   resolveChartChannelVisibility,
@@ -418,6 +424,14 @@ export function ResultDetailChart({
     () => resolveConfluenceCandleReasons(filterDetails, confluenceSources),
     [confluenceSources, filterDetails],
   );
+  const interactionCandleReasons = useMemo(
+    () => resolveChannelInteractionCandleReasons(indicatorDetails, mode),
+    [indicatorDetails, mode],
+  );
+  const interactionSummaries = useMemo(
+    () => resolveChannelInteractionSummaries(indicatorDetails, mode),
+    [indicatorDetails, mode],
+  );
   const adrCandleReasons = useMemo(() => resolveAdrCandleReasons(adrWindow), [adrWindow]);
   const gapCandleReasons = useMemo(() => resolveGapCandleReasons(gapWindow), [gapWindow]);
   const candleReasons = mode === "confluence"
@@ -426,7 +440,9 @@ export function ResultDetailChart({
       ? adrCandleReasons
       : mode === "gap"
         ? gapCandleReasons
-        : channelRespectCandleReasons;
+        : interactionCandleReasons.size
+          ? interactionCandleReasons
+          : channelRespectCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
@@ -1173,6 +1189,26 @@ export function ResultDetailChart({
         </div>
       ) : null}
 
+      {interactionSummaries.length ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#20232a] bg-[#0d1014] px-3 py-2 text-[11px]">
+          {interactionSummaries.map((summary) => (
+            <span
+              key={`${summary.action}-${summary.line}`}
+              className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1 text-[#d1d4dc]"
+            >
+              {summary.actionLabel} · {summary.line.replace(/_/g, " ")} line
+              {summary.candlesSince !== null ? ` · ${summary.candlesSince} candles ago` : ""}
+              {summary.action === "reclaimed_from_below_bullish"
+                ? ` · ${summary.closedBelowCount} close${summary.closedBelowCount === 1 ? "" : "s"} below first`
+                : " · never closed below the line"}
+            </span>
+          ))}
+          <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1 text-[#9ca3af]">
+            Hover each outlined candle to step through the sequence.
+          </span>
+        </div>
+      ) : null}
+
       {mode === "adr" && adrWindow ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-[#20232a] bg-[#0d1014] px-3 py-2 text-[11px]">
           <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1" style={{ color: ADR_HIGHLIGHT_COLOR }}>
@@ -1378,7 +1414,27 @@ export function ResultDetailChart({
               </span>
             </>
           ) : null}
-          {mode !== "confluence" && mode !== "adr" && mode !== "gap" && candleReasons.size ? (
+          {interactionSummaries.length && candleReasons.size ? (
+            <>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: INTERACTION_BELOW_COLOR }} />
+                Closed below line
+              </span>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: INTERACTION_EVENT_COLOR }} />
+                Reclaim / rejection candle
+              </span>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: INTERACTION_CONTEXT_COLOR }} />
+                Prior candle
+              </span>
+              <span className="flex items-center gap-1.5 text-[#9ca3af]">
+                <span className="h-2.5 w-2.5 border-2" style={{ borderColor: INTERACTION_STILL_ABOVE_COLOR }} />
+                Still above now
+              </span>
+            </>
+          ) : null}
+          {!interactionSummaries.length && mode !== "confluence" && mode !== "adr" && mode !== "gap" && candleReasons.size ? (
             <span className="flex items-center gap-1.5 text-[#9ca3af]">
               <span className="h-2.5 w-2.5 border-2" style={{ borderColor: CHANNEL_RESPECT_HIGHLIGHT_COLOR }} />
               Channel Respect match

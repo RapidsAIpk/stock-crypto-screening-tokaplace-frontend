@@ -374,6 +374,134 @@ export const GAP_DOWN_HIGHLIGHT_COLOR = "#e879f9";
 export const GAP_UP_FILL_COLOR = "rgba(34, 211, 238, 0.28)";
 export const GAP_DOWN_FILL_COLOR = "rgba(232, 121, 249, 0.28)";
 
+// Channel interaction stages (M3-ISS-02). Distinct hues so a Reclaim's run of
+// closes *below* the line is impossible to confuse with a Rejection, which
+// never closes below at all.
+export const INTERACTION_BELOW_COLOR = "#f87171";
+export const INTERACTION_EVENT_COLOR = "#4ade80";
+export const INTERACTION_CONTEXT_COLOR = "#94a3b8";
+export const INTERACTION_STILL_ABOVE_COLOR = "#38bdf8";
+
+const INTERACTION_ACTION_LABELS: Record<string, string> = {
+  piercing_from_below: "Piercing From Below",
+  reclaimed_from_below_bullish: "Reclaimed From Below",
+  rejected_from_above_bullish: "Rejected From Above",
+  rejected_from_below_bearish: "Rejected From Below",
+};
+
+const INTERACTION_STAGE_LABELS: Record<string, string> = {
+  closed_below: "Closed Below Line",
+  reclaim_close_above: "Reclaim — Closed Back Above",
+  still_above_now: "Still Above Now",
+  came_from_above: "Approached From Above",
+  rejected_close_above: "Rejection — Closed Back Above",
+  came_from_below: "Approached From Below",
+  rejected_close_below: "Rejection — Closed Back Below",
+  pierced_close_above: "Pierced — Closed Above",
+};
+
+const INTERACTION_STAGE_COLORS: Record<string, string> = {
+  closed_below: INTERACTION_BELOW_COLOR,
+  reclaim_close_above: INTERACTION_EVENT_COLOR,
+  still_above_now: INTERACTION_STILL_ABOVE_COLOR,
+  came_from_above: INTERACTION_CONTEXT_COLOR,
+  rejected_close_above: INTERACTION_EVENT_COLOR,
+  came_from_below: INTERACTION_CONTEXT_COLOR,
+  rejected_close_below: INTERACTION_EVENT_COLOR,
+  pierced_close_above: INTERACTION_EVENT_COLOR,
+};
+
+export interface ChannelInteractionSummary {
+  action: string;
+  actionLabel: string;
+  line: string;
+  candlesSince: number | null;
+  stageCount: number;
+  closedBelowCount: number;
+}
+
+function interactionEntries(
+  indicatorDetails: Array<{ name: string; passed: boolean; evidence?: unknown }> = [],
+  mode?: string,
+): Array<Record<string, unknown>> {
+  const indicatorName = mode === "lrc" ? "lrc" : mode === "regression" ? "regression" : null;
+  if (!indicatorName) return [];
+
+  const detail = indicatorDetails.find((item) => item.name === indicatorName && item.passed);
+  const evidence = detail?.evidence as Record<string, unknown> | undefined;
+  const entries = evidence?.channel_interactions;
+  return Array.isArray(entries) ? (entries as Array<Record<string, unknown>>) : [];
+}
+
+/**
+ * One-line summaries of each matched channel interaction, for the chart's
+ * info bar.
+ */
+export function resolveChannelInteractionSummaries(
+  indicatorDetails: Array<{ name: string; passed: boolean; evidence?: unknown }> = [],
+  mode?: string,
+): ChannelInteractionSummary[] {
+  return interactionEntries(indicatorDetails, mode).flatMap((entry) => {
+    if (!entry.matched) return [];
+    const stages = Array.isArray(entry.stages) ? entry.stages as Array<Record<string, unknown>> : [];
+    const action = String(entry.action ?? "");
+
+    return [{
+      action,
+      actionLabel: INTERACTION_ACTION_LABELS[action] ?? action.replace(/_/g, " "),
+      line: String(entry.line ?? ""),
+      candlesSince: finiteNumber(entry.candles_since),
+      stageCount: stages.length,
+      closedBelowCount: stages.filter((stage) => stage.stage === "closed_below").length,
+    }];
+  });
+}
+
+/**
+ * Highlights each candle that makes up a channel interaction, stage by stage.
+ *
+ * This is the visual proof behind M3-ISS-02: for a Reclaim you can see the
+ * red run of closes below the line, then the green candle that closed back
+ * above; for a Rejection there is no red run at all, because a rejection
+ * never closes below the line.
+ */
+export function resolveChannelInteractionCandleReasons(
+  indicatorDetails: Array<{ name: string; passed: boolean; evidence?: unknown }> = [],
+  mode?: string,
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+
+  interactionEntries(indicatorDetails, mode).forEach((entry) => {
+    if (!entry.matched) return;
+    const action = String(entry.action ?? "");
+    const actionLabel = INTERACTION_ACTION_LABELS[action] ?? action.replace(/_/g, " ");
+    const line = String(entry.line ?? "").replace(/_/g, " ");
+    const stages = Array.isArray(entry.stages) ? entry.stages as Array<Record<string, unknown>> : [];
+
+    stages.forEach((stage) => {
+      const time = normalizedCandleTime(stage.candle_time);
+      if (time === null) return;
+
+      const stageName = String(stage.stage ?? "");
+      const lineValue = finiteNumber(stage.line_value);
+      const close = finiteNumber(stage.close);
+      const stageLabel = INTERACTION_STAGE_LABELS[stageName] ?? stageName.replace(/_/g, " ");
+
+      const numbers = lineValue !== null && close !== null
+        ? ` Close ${close} vs ${line} line ${lineValue.toFixed(4)}.`
+        : "";
+
+      addCandleReason(reasons, time, {
+        color: INTERACTION_STAGE_COLORS[stageName] ?? INTERACTION_EVENT_COLOR,
+        label: `${actionLabel} — ${stageLabel}`,
+        detail: `${String(stage.note ?? "")}${numbers}`,
+      });
+    });
+  });
+
+  return reasons;
+}
+
 export const ADR_HIGHLIGHT_COLOR = "#38bdf8";
 export const ADR_ABOVE_AVERAGE_COLOR = "#22c55e";
 export const ADR_BELOW_AVERAGE_COLOR = "#f97316";

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { AreaRule, IndicatorConfig, IndicatorName, IndicatorTimeframe, TimeframeMode, TrendyAdxCondition } from "@/types/screener";
+import type { AreaRule, EmaConditionName, EmaConfig, IndicatorConfig, IndicatorName, IndicatorTimeframe, TimeframeMode, TrendyAdxCondition } from "@/types/screener";
 import {
   allowedConfirmationPatternsForTypes,
   collectConfirmationTypes,
+  EMA_CONDITION_LABELS,
   filterConfirmationPatternsForTypes,
   filterVlrCandlePatternsForDirection,
   vlrAllowedCandlePatterns,
@@ -13,13 +14,23 @@ import {
   TREND_CHANNEL_DISABLED,
   TREND_CHANNEL_LINE_ACTIONS,
   TREND_CHANNEL_ZONE_ACTIONS,
+  isPhase2ChannelAction,
+  isReclaimChannelAction,
   isTrendAreaRuleDisabled,
   getDefaultIndicatorConfig,
   isChannelLineIndicatorFieldHidden,
+  normalizeEmaConfig,
+  defaultTrendyAdxCondition,
+  isTrendyAdxActiveCondition,
+  isTrendyAdxDirectionCondition,
+  isTrendyAdxEventCondition,
   trendyAdxConditionsForMode,
+  TRENDY_ADX_DIRECTIONS,
 } from "@/types/screener";
 import { Plus, X, ChevronDown, ChevronRight } from "lucide-react";
+import { ClearableNumberInput } from "./ClearableNumberInput";
 import { PresetOrCustomField } from "./PresetOrCustomField";
+import { EmaFilterEditor } from "./EmaFilterEditor";
 
 interface Props {
   indicators: IndicatorConfig[];
@@ -87,6 +98,11 @@ const FIELD_HELP_TEXT: Record<string, string> = {
   lin_reg: "On = use smoothed LinReg candles (TV default). Off = use normal price candles.",
   price_position: "Where the LinReg candle sits vs the white signal line.",
   close_location: "Optional extra check on LinReg close. “Any” skips this check.",
+  selection_mode: "How selected channel lines or area rules are combined.",
+  candles_since_min: "Earliest matching candle age allowed for the selected Phase 2 action.",
+  candles_since_max: "Oldest matching candle age allowed for the selected Phase 2 action.",
+  min_consecutive_below: "Minimum consecutive candles below the channel before a reclaim can pass.",
+  require_still_above_now: "Requires price to still be above the reclaimed line now.",
 };
 
 const RELATIVE_VOLUME_FIELD_HELP_TEXT: Record<string, string> = {
@@ -95,6 +111,13 @@ const RELATIVE_VOLUME_FIELD_HELP_TEXT: Record<string, string> = {
   window: "How many completed candles back the selected RVOL signal can occur.",
   vol_alert: "Matches TradingView's Alert when volume reaches input.",
 };
+
+const EMA_SUMMARY_ORDER: EmaConditionName[] = [
+  "touch_from_above",
+  "piercing_from_below",
+  "close_above",
+  "touched_or_pierced_and_closed_above",
+];
 
 const ADX_FIELD_HELP_TEXT: Record<string, string> = {
   window: "Number of completed candles to look back for signals.",
@@ -153,6 +176,14 @@ function trendAreaRuleUsesTouchType(area: AreaRule): boolean {
 
 function trendAreaRuleUsesBreachControls(area: AreaRule): boolean {
   return normalizedTrendAction(area) === "breach";
+}
+
+function trendAreaRuleUsesPhase2Range(area: AreaRule): boolean {
+  return isPhase2ChannelAction(normalizedTrendAction(area));
+}
+
+function trendAreaRuleUsesReclaimFields(area: AreaRule): boolean {
+  return isReclaimChannelAction(normalizedTrendAction(area));
 }
 
 function trendAreaRuleHasConfirmationCriteria(area: AreaRule): boolean {
@@ -228,6 +259,15 @@ export function IndicatorsFilter({
     updated[index] = {
       ...updated[index],
       config: { ...updated[index].config, ...patch },
+    };
+    onChange(updated);
+  };
+
+  const replaceConfig = (index: number, config: Record<string, unknown>) => {
+    const updated = [...indicators];
+    updated[index] = {
+      ...updated[index],
+      config,
     };
     onChange(updated);
   };
@@ -325,6 +365,17 @@ export function IndicatorsFilter({
         parts.push("area rules disabled");
       }
     }
+    if (ind.name === "ema") {
+      const ema = normalizeEmaConfig(c);
+      parts.push(`EMA ${ema.periods.join("/")}`);
+      parts.push(ema.selection_mode);
+      const activeConditions = EMA_SUMMARY_ORDER
+        .filter((name) => ema.conditions[name].enabled)
+        .map((name) => EMA_CONDITION_LABELS[name].replace(" From ", " "));
+      if (activeConditions.length) {
+        parts.push(activeConditions.join(", "));
+      }
+    }
     return parts.length > 0 ? parts.join(" · ") : "Using defaults";
   };
 
@@ -365,7 +416,7 @@ export function IndicatorsFilter({
     const current = adxConditions(indicatorIndex);
     const next = current.some((condition) => condition.id === conditionId)
       ? current.filter((condition) => condition.id !== conditionId)
-      : [...current, { id: conditionId }];
+      : [...current, defaultTrendyAdxCondition(conditionId)];
     updateConfig(indicatorIndex, "conditions", next);
   };
 
@@ -455,6 +506,12 @@ export function IndicatorsFilter({
               {!isCollapsed && def && (
                 <div className="px-3 pb-3 pt-1">
                   <div className="grid grid-cols-2 gap-2">
+                    {ind.name === "ema" && (
+                      <EmaFilterEditor
+                        config={ind.config}
+                        onChange={(nextConfig: EmaConfig) => replaceConfig(idx, nextConfig as unknown as Record<string, unknown>)}
+                      />
+                    )}
                     {def.fields.map((field, fieldIndex) => {
                       if (isIndicatorFieldHidden(ind, field.key)) {
                         return null;
@@ -567,6 +624,21 @@ export function IndicatorsFilter({
                                 });
                                 return;
                               }
+                              if ((ind.name === "lrc" || ind.name === "regression") && field.key === "action") {
+                                const nextAction = e.target.value || "touch";
+                                const patch: Record<string, unknown> = { action: nextAction };
+                                if (isPhase2ChannelAction(nextAction)) {
+                                  patch.candles_since_min = ind.config.candles_since_min ?? 0;
+                                  patch.candles_since_max = ind.config.candles_since_max ?? 5;
+                                  patch.window = ind.config.window ?? 1;
+                                }
+                                if (isReclaimChannelAction(nextAction)) {
+                                  patch.min_consecutive_below = ind.config.min_consecutive_below ?? 1;
+                                  patch.require_still_above_now = ind.config.require_still_above_now ?? true;
+                                }
+                                updateConfigPatch(idx, patch);
+                                return;
+                              }
                               updateConfig(idx, field.key, e.target.value || null);
                             }}
                             className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
@@ -623,6 +695,8 @@ export function IndicatorsFilter({
                               const areaAction = normalizedTrendAction(area);
                               const touchTypeActive = !disabledRule && trendAreaRuleUsesTouchType(area);
                               const breachControlsActive = !disabledRule && trendAreaRuleUsesBreachControls(area);
+                              const phase2RangeActive = !disabledRule && trendAreaRuleUsesPhase2Range(area);
+                              const reclaimFieldsActive = !disabledRule && trendAreaRuleUsesReclaimFields(area);
                               const confirmationActive = !disabledRule && Boolean(area.confirmation);
                               const confirmationCriteriaActive = confirmationActive;
                               const confirmationWindowActive = confirmationActive && trendAreaRuleHasConfirmationCriteria(area);
@@ -676,11 +750,23 @@ export function IndicatorsFilter({
                                           updateAreaRulePatch(idx, areaIdx, { action: TREND_CHANNEL_DISABLED });
                                           return;
                                         }
-                                        updateAreaRulePatch(idx, areaIdx, {
+                                        const patch: Partial<AreaRule> = {
                                           action: nextAction,
                                           area: area.area === TREND_CHANNEL_DISABLED
                                             ? "top_line"
                                             : area.area,
+                                        };
+                                        if (isPhase2ChannelAction(nextAction)) {
+                                          patch.candles_since_min = area.candles_since_min ?? 0;
+                                          patch.candles_since_max = area.candles_since_max ?? 5;
+                                          patch.window = area.window ?? 1;
+                                        }
+                                        if (isReclaimChannelAction(nextAction)) {
+                                          patch.min_consecutive_below = area.min_consecutive_below ?? 1;
+                                          patch.require_still_above_now = area.require_still_above_now ?? true;
+                                        }
+                                        updateAreaRulePatch(idx, areaIdx, {
+                                          ...patch,
                                         });
                                       }}
                                       className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
@@ -752,20 +838,81 @@ export function IndicatorsFilter({
                                   )}
                                   {!disabledRule && (
                                   <>
-                                  <div className="space-y-1">
-                                    <div className="text-[10px] text-muted-foreground">Window</div>
-                                    <input
-                                      type="number"
-                                      value={(area.window as number | null) ?? ""}
-                                      onChange={(e) => updateAreaRule(idx, areaIdx, "window", e.target.value === "" ? null : Number(e.target.value))}
-                                      onBlur={(e) => {
-                                        if (!e.target.value) {
-                                          updateAreaRule(idx, areaIdx, "window", 1);
-                                        }
-                                      }}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
-                                    />
-                                  </div>
+                                  {!phase2RangeActive && (
+                                    <div className="space-y-1">
+                                      <div className="text-[10px] text-muted-foreground">Window</div>
+                                      <input
+                                        type="number"
+                                        value={(area.window as number | null) ?? ""}
+                                        onChange={(e) => updateAreaRule(idx, areaIdx, "window", e.target.value === "" ? null : Number(e.target.value))}
+                                        onBlur={(e) => {
+                                          if (!e.target.value) {
+                                            updateAreaRule(idx, areaIdx, "window", 1);
+                                          }
+                                        }}
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      />
+                                    </div>
+                                  )}
+                                  {phase2RangeActive && (
+                                    <>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Candles Since Min</div>
+                                        <input
+                                          type="number"
+                                          value={(area.candles_since_min as number | null) ?? ""}
+                                          onChange={(e) => updateAreaRule(idx, areaIdx, "candles_since_min", e.target.value === "" ? null : Number(e.target.value))}
+                                          onBlur={(e) => {
+                                            if (!e.target.value) {
+                                              updateAreaRule(idx, areaIdx, "candles_since_min", 0);
+                                            }
+                                          }}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Candles Since Max</div>
+                                        <input
+                                          type="number"
+                                          value={(area.candles_since_max as number | null) ?? ""}
+                                          onChange={(e) => updateAreaRule(idx, areaIdx, "candles_since_max", e.target.value === "" ? null : Number(e.target.value))}
+                                          onBlur={(e) => {
+                                            if (!e.target.value) {
+                                              updateAreaRule(idx, areaIdx, "candles_since_max", 5);
+                                            }
+                                          }}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        />
+                                      </div>
+                                    </>
+                                  )}
+                                  {reclaimFieldsActive && (
+                                    <>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Min Consecutive Below</div>
+                                        <input
+                                          type="number"
+                                          value={(area.min_consecutive_below as number | null) ?? ""}
+                                          onChange={(e) => updateAreaRule(idx, areaIdx, "min_consecutive_below", e.target.value === "" ? null : Number(e.target.value))}
+                                          onBlur={(e) => {
+                                            if (!e.target.value) {
+                                              updateAreaRule(idx, areaIdx, "min_consecutive_below", 1);
+                                            }
+                                          }}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Require Still Above Now</div>
+                                        <button
+                                          onClick={() => updateAreaRule(idx, areaIdx, "require_still_above_now", area.require_still_above_now === false)}
+                                          className={`h-7 w-7 rounded border transition-colors ${
+                                            area.require_still_above_now !== false ? "bg-primary border-primary" : "border-border"
+                                          }`}
+                                        />
+                                      </div>
+                                    </>
+                                  )}
                                   <div className="space-y-1">
                                     <div className="text-[10px] text-muted-foreground">Tolerance %</div>
                                     <input
@@ -921,17 +1068,124 @@ export function IndicatorsFilter({
                                             />
                                             <span className="text-xs text-foreground">{conditionDef.label}</span>
                                           </div>
-                                          {isSelected && conditionDef.sub === "candles_since" && (
-                                            <div className="pl-6">
-                                              <PresetOrCustomField
-                                                label="Candles Since Event"
-                                                value={(selected?.candles_since as number | null | undefined) ?? null}
-                                                presets={[0, 1, 2, 3, 5, 10]}
-                                                suffix=" candles ago"
-                                                allowEmpty
-                                                emptyLabel="Any (default)"
-                                                onChange={(v) => updateAdxConditionSub(idx, conditionDef.id, { candles_since: v })}
-                                              />
+                                          {isSelected && isTrendyAdxDirectionCondition(conditionDef.id) && (
+                                            <div className="grid gap-2 pl-6 sm:grid-cols-3">
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Direction
+                                                </label>
+                                                <select
+                                                  value={String(selected?.direction ?? "any")}
+                                                  onChange={(event) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, { direction: event.target.value as TrendyAdxCondition["direction"] })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                >
+                                                  {TRENDY_ADX_DIRECTIONS.map((direction) => (
+                                                    <option key={direction} value={direction}>
+                                                      {direction.replace(/_/g, " ")}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Direction Change Min
+                                                </label>
+                                                <ClearableNumberInput
+                                                  value={selected?.candles_since_direction_change_min as number | null | undefined}
+                                                  fallback={0}
+                                                  onCommit={(next) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_direction_change_min: next,
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Direction Change Max
+                                                </label>
+                                                <ClearableNumberInput
+                                                  value={selected?.candles_since_direction_change_max as number | null | undefined}
+                                                  fallback={5}
+                                                  onCommit={(next) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_direction_change_max: next,
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                          {isSelected && isTrendyAdxEventCondition(conditionDef.id) && (
+                                            <div className="grid gap-2 pl-6 sm:grid-cols-2">
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Event Min
+                                                </label>
+                                                <ClearableNumberInput
+                                                  value={selected?.candles_since_min as number | null | undefined}
+                                                  fallback={0}
+                                                  onCommit={(next) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_min: next,
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Candles Since Event Max
+                                                </label>
+                                                <ClearableNumberInput
+                                                  value={selected?.candles_since_max as number | null | undefined}
+                                                  fallback={5}
+                                                  onCommit={(next) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      candles_since_max: next,
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                          {isSelected && isTrendyAdxActiveCondition(conditionDef.id) && (
+                                            <div className="grid gap-2 pl-6 sm:grid-cols-2">
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Consecutive Active Min
+                                                </label>
+                                                <ClearableNumberInput
+                                                  value={selected?.active_candles_min as number | null | undefined}
+                                                  fallback={1}
+                                                  onCommit={(next) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      active_candles_min: next,
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                                  Consecutive Active Max
+                                                </label>
+                                                <ClearableNumberInput
+                                                  value={selected?.active_candles_max as number | null | undefined}
+                                                  fallback={5}
+                                                  onCommit={(next) =>
+                                                    updateAdxConditionSub(idx, conditionDef.id, {
+                                                      active_candles_max: next,
+                                                    })
+                                                  }
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                />
+                                              </div>
                                             </div>
                                           )}
                                           {isSelected && conditionDef.sub === "distance" && (
