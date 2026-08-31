@@ -6,6 +6,7 @@ interface Props {
   min?: number;
   step?: number;
   className?: string;
+  disabled?: boolean;
   onCommit: (value: number) => void;
 }
 
@@ -24,6 +25,7 @@ export function ClearableNumberInput({
   min = 0,
   step,
   className,
+  disabled,
   onCommit,
 }: Props) {
   const [rawText, setRawText] = useState(String(value ?? fallback));
@@ -48,6 +50,7 @@ export function ClearableNumberInput({
       min={min}
       step={step}
       value={rawText}
+      disabled={disabled}
       onChange={(event) => setRawText(event.target.value)}
       onBlur={(event) => commit(event.target.value)}
       className={className}

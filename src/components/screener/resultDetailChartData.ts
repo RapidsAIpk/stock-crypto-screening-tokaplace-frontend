@@ -1,4 +1,10 @@
-import type { MarketCandle } from "@/types/screener";
+import {
+  EMA_CONDITION_LABELS,
+  normalizeEmaConfig,
+  type EmaConditionConfig,
+  type EmaConditionName,
+  type MarketCandle,
+} from "@/types/screener";
 
 export interface LinRegSettings {
   lrLength: number;
@@ -499,6 +505,249 @@ export function resolveChannelInteractionCandleReasons(
     });
   });
 
+  return reasons;
+}
+
+export const TRENDY_ADX_DIRECTION_HIGHLIGHT_COLOR = "#22d3ee";
+
+const TRENDY_ADX_DIRECTION_LINE_LABELS: Record<string, string> = {
+  adx: "ADX",
+  di_plus: "DI+",
+  di_minus: "DI-",
+};
+
+export interface TrendyAdxDirectionStreak {
+  line: "adx" | "di_plus" | "di_minus" | string;
+  lineLabel: string;
+  direction: string;
+  streak: number | null;
+  startTime: number;
+  endTime: number;
+}
+
+/**
+ * Reads the `direction_streaks` evidence the backend attaches to a matched
+ * adx_direction / di_plus_direction / di_minus_direction condition (see
+ * services/trendy_adx.py::direction_streaks_evidence) into a typed list.
+ */
+export function resolveTrendyAdxDirectionStreaks(
+  indicatorDetails: Array<{ name: string; passed: boolean; evidence?: unknown }> = [],
+): TrendyAdxDirectionStreak[] {
+  const detail = indicatorDetails.find((item) => item.name === "adx" && item.passed);
+  const evidence = detail?.evidence as Record<string, unknown> | undefined;
+  const rawStreaks = Array.isArray(evidence?.direction_streaks)
+    ? (evidence.direction_streaks as Array<Record<string, unknown>>)
+    : [];
+
+  return rawStreaks.flatMap((streak) => {
+    const startTime = normalizedCandleTime(streak.start_time);
+    const endTime = normalizedCandleTime(streak.end_time);
+    if (startTime === null || endTime === null) return [];
+
+    const line = String(streak.line ?? "");
+    return [{
+      line,
+      lineLabel: TRENDY_ADX_DIRECTION_LINE_LABELS[line] ?? line.toUpperCase(),
+      direction: String(streak.direction ?? ""),
+      streak: finiteNumber(streak.streak),
+      startTime,
+      endTime,
+    }];
+  });
+}
+
+/**
+ * Builds a per-candle-time map outlining exactly which candles make up the
+ * current ADX / DI+ / DI- direction streak that a Trendy ADX direction
+ * condition (adx_direction / di_plus_direction / di_minus_direction) matched
+ * on - so it's visible on the chart, not just implied by the sticker.
+ */
+export function resolveTrendyAdxDirectionCandleReasons(
+  indicatorDetails: Array<{ name: string; passed: boolean; evidence?: unknown }> = [],
+  candles: Array<{ time: number }> = [],
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+  const streaks = resolveTrendyAdxDirectionStreaks(indicatorDetails);
+
+  streaks.forEach(({ lineLabel, direction, streak, startTime, endTime }) => {
+    candles.forEach((candle) => {
+      if (candle.time < startTime || candle.time > endTime) return;
+      addCandleReason(reasons, candle.time, {
+        color: TRENDY_ADX_DIRECTION_HIGHLIGHT_COLOR,
+        label: `${lineLabel} Direction — ${direction}`,
+        detail: `Part of the current ${streak ?? "?"}-candle ${direction} streak on ${lineLabel} that drove the Trendy ADX direction filter.`,
+      });
+    });
+  });
+
+  return reasons;
+}
+
+/** Merges several candle-reason maps into one, preserving each map's own reasons per candle. */
+export function mergeCandleReasons(
+  ...maps: Array<Map<number, CandleMatchReason[]>>
+): Map<number, CandleMatchReason[]> {
+  const merged = new Map<number, CandleMatchReason[]>();
+  maps.forEach((map) => {
+    map.forEach((reasonList, time) => {
+      reasonList.forEach((reason) => addCandleReason(merged, time, reason));
+    });
+  });
+  return merged;
+}
+
+// =========================================================
+// EMA overlay - mirrors services/ema.py exactly (compute_ema's recursive
+// formula, and the touch/piercing/close-above event predicates) so the
+// chart's EMA line and highlighted event candle match what the backend
+// filter actually evaluated, not an approximation of it.
+// =========================================================
+
+export const EMA_LINE_COLORS = ["#f6b93b", "#38bdf8", "#a78bfa", "#22c55e", "#f472b6", "#facc15"];
+export const EMA_EVENT_HIGHLIGHT_COLOR = "#fb923c";
+
+export interface EmaOverlayPeriod {
+  period: number;
+  color: string;
+  values: Array<number | null>;
+  matchedEventIndex: number | null;
+  matchedConditionLabel: string | null;
+}
+
+function computeEmaSeries(closes: number[], period: number): number[] {
+  const out = new Array(closes.length).fill(NaN);
+  if (!closes.length || period <= 0) return out;
+  const multiplier = 2 / (period + 1);
+  out[0] = closes[0];
+  for (let index = 1; index < closes.length; index += 1) {
+    out[index] = (closes[index] - out[index - 1]) * multiplier + out[index - 1];
+  }
+  return out;
+}
+
+type EmaEventPredicate = (candles: ChartCandle[], ema: number[], index: number) => boolean;
+
+function emaTouchFromAbove(candles: ChartCandle[], ema: number[], index: number): boolean {
+  if (index <= 0) return false;
+  const prevClose = candles[index - 1].close;
+  const prevEma = ema[index - 1];
+  const emaValue = ema[index];
+  if (!Number.isFinite(prevEma) || !Number.isFinite(emaValue)) return false;
+  const candle = candles[index];
+  return prevClose > prevEma && candle.low <= emaValue && candle.high >= emaValue && candle.close > emaValue;
+}
+
+function emaPiercingFromBelow(candles: ChartCandle[], ema: number[], index: number): boolean {
+  if (index <= 0) return false;
+  const prevClose = candles[index - 1].close;
+  const prevEma = ema[index - 1];
+  const emaValue = ema[index];
+  if (!Number.isFinite(prevEma) || !Number.isFinite(emaValue)) return false;
+  const candle = candles[index];
+  return prevClose < prevEma && candle.low < emaValue && candle.high >= emaValue && candle.close > emaValue;
+}
+
+function emaCloseAbove(candles: ChartCandle[], ema: number[], index: number): boolean {
+  const emaValue = ema[index];
+  return Number.isFinite(emaValue) && candles[index].close > emaValue;
+}
+
+function findLatestEmaEvent(candles: ChartCandle[], ema: number[], predicate: EmaEventPredicate): number | null {
+  for (let index = candles.length - 1; index >= 0; index -= 1) {
+    if (predicate(candles, ema, index)) return index;
+  }
+  return null;
+}
+
+function emaCandlesSinceInRange(
+  eventIndex: number | null,
+  currentIndex: number,
+  min?: number | null,
+  max?: number | null,
+): boolean {
+  if (eventIndex === null) return false;
+  const candlesSince = currentIndex - eventIndex;
+  if (candlesSince < 0) return false;
+  if (min != null && candlesSince < min) return false;
+  if (max != null && candlesSince > max) return false;
+  return true;
+}
+
+/**
+ * Computes each configured EMA period's line values plus, per period, the one
+ * historical candle (if any, within its configured candles-since range) that
+ * satisfied one of its enabled conditions - the exact candle the backend
+ * filter would have matched on.
+ */
+export function resolveEmaOverlay(
+  emaIndicator: { config?: Record<string, unknown> } | undefined,
+  candles: ChartCandle[],
+): EmaOverlayPeriod[] {
+  if (!emaIndicator?.config || !candles.length) return [];
+  const normalized = normalizeEmaConfig(emaIndicator.config);
+  const currentIndex = candles.length - 1;
+  const closes = candles.map((candle) => candle.close);
+
+  return normalized.periods.map((period, colorIndex) => {
+    const emaSeries = computeEmaSeries(closes, period);
+    let matchedEventIndex: number | null = null;
+    let matchedConditionLabel: string | null = null;
+
+    (Object.entries(normalized.conditions) as Array<[EmaConditionName, EmaConditionConfig]>).forEach(
+      ([name, conditionConfig]) => {
+        if (!conditionConfig.enabled || matchedEventIndex !== null) return;
+
+        let eventIndex: number | null = null;
+        if (name === "touch_from_above") {
+          eventIndex = findLatestEmaEvent(candles, emaSeries, emaTouchFromAbove);
+        } else if (name === "piercing_from_below") {
+          eventIndex = findLatestEmaEvent(candles, emaSeries, emaPiercingFromBelow);
+        } else if (name === "close_above") {
+          eventIndex = findLatestEmaEvent(candles, emaSeries, emaCloseAbove);
+        } else if (name === "touched_or_pierced_and_closed_above") {
+          eventIndex = findLatestEmaEvent(
+            candles,
+            emaSeries,
+            (c, e, i) => emaTouchFromAbove(c, e, i) || emaPiercingFromBelow(c, e, i),
+          );
+          if (conditionConfig.require_still_above_now !== false && !emaCloseAbove(candles, emaSeries, currentIndex)) {
+            eventIndex = null;
+          }
+        }
+
+        if (emaCandlesSinceInRange(eventIndex, currentIndex, conditionConfig.candles_since_min, conditionConfig.candles_since_max)) {
+          matchedEventIndex = eventIndex;
+          matchedConditionLabel = EMA_CONDITION_LABELS[name] ?? name;
+        }
+      },
+    );
+
+    return {
+      period,
+      color: EMA_LINE_COLORS[colorIndex % EMA_LINE_COLORS.length],
+      values: emaSeries.map((value) => (Number.isFinite(value) ? value : null)),
+      matchedEventIndex,
+      matchedConditionLabel,
+    };
+  });
+}
+
+/** Outlines the exact candle that triggered each EMA period's matched condition. */
+export function resolveEmaCandleReasons(
+  emaOverlay: EmaOverlayPeriod[],
+  candles: ChartCandle[],
+): Map<number, CandleMatchReason[]> {
+  const reasons = new Map<number, CandleMatchReason[]>();
+  emaOverlay.forEach(({ period, matchedEventIndex, matchedConditionLabel }) => {
+    if (matchedEventIndex === null || matchedConditionLabel === null) return;
+    const candle = candles[matchedEventIndex];
+    if (!candle) return;
+    addCandleReason(reasons, candle.time, {
+      color: EMA_EVENT_HIGHLIGHT_COLOR,
+      label: `EMA ${period} — ${matchedConditionLabel}`,
+      detail: `This candle triggered the ${matchedConditionLabel} condition for EMA(${period}).`,
+    });
+  });
   return reasons;
 }
 

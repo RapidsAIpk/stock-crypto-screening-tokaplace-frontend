@@ -4,6 +4,7 @@ import {
   CandlestickSeries,
   ColorType,
   createChart,
+  createSeriesMarkers,
   CrosshairMode,
   HistogramSeries,
   LineSeries,
@@ -12,6 +13,7 @@ import {
   type IChartApi,
   type LineData,
   type LogicalRange,
+  type SeriesMarker,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
@@ -32,7 +34,9 @@ import {
   GAP_UP_HIGHLIGHT_COLOR,
   CONFLUENCE_SOURCE_COLORS,
   createLinearRegressionCandles,
+  EMA_EVENT_HIGHLIGHT_COLOR,
   LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
+  mergeCandleReasons,
   normalizeAdrChartWindow,
   normalizeConfluenceChartSources,
   normalizeGapChartWindow,
@@ -48,9 +52,14 @@ import {
   resolveGapCandleReasons,
   resolveChartChannelVisibility,
   resolveConfluenceCandleReasons,
+  resolveEmaCandleReasons,
+  resolveEmaOverlay,
+  resolveTrendyAdxDirectionCandleReasons,
+  resolveTrendyAdxDirectionStreaks,
   trendValueAt,
   type AdrChartWindow,
   type CandleMatchReason,
+  type EmaOverlayPeriod,
   type GapChartWindow,
   type ChartCandle,
   type ConfluenceChartSource,
@@ -67,7 +76,7 @@ import {
   TV_BACKGROUND,
 } from "./trendChannelChartStyles";
 
-type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg" | "adr" | "gap";
+type ChartMode = "price" | "confluence" | "lrc" | "regression" | "trend" | "linreg" | "adr" | "gap" | "ema";
 type RangeOption = 20 | 50 | 100 | "all";
 type TrendyAdxPoint = {
   time: number;
@@ -242,6 +251,38 @@ function unixTime(time: Time): number {
   return Math.floor(Date.UTC(time.year, time.month - 1, time.day) / 1000);
 }
 
+// Scan timeframes are lowercase, e.g. "1m", "5m", "1h", "4h", "1day" (see TIMEFRAMES in types/screener.ts).
+function isDateGranularityTimeframe(timeframe: string): boolean {
+  return /day|week|month/i.test(timeframe);
+}
+
+interface DirectionIndicator {
+  arrow: "▲" | "▼" | "→" | "";
+  delta: string;
+  color: string;
+}
+
+const DIRECTION_UP_COLOR = "#22c55e";
+const DIRECTION_DOWN_COLOR = "#ef4444";
+const DIRECTION_FLAT_COLOR = "#9ca3af";
+
+function directionIndicator(current: number | null | undefined, previous: number | null | undefined): DirectionIndicator {
+  if (current == null || previous == null) return { arrow: "", delta: "", color: DIRECTION_FLAT_COLOR };
+  const delta = current - previous;
+  if (delta > 0) return { arrow: "▲", delta: `+${delta.toFixed(3)}`, color: DIRECTION_UP_COLOR };
+  if (delta < 0) return { arrow: "▼", delta: delta.toFixed(3), color: DIRECTION_DOWN_COLOR };
+  return { arrow: "→", delta: "0.000", color: DIRECTION_FLAT_COLOR };
+}
+
+function DirectionBadge({ indicator }: { indicator: DirectionIndicator }) {
+  if (!indicator.arrow) return null;
+  return (
+    <span style={{ color: indicator.color, marginLeft: 4 }}>
+      {indicator.arrow} {indicator.delta}
+    </span>
+  );
+}
+
 function formatTime(timestamp: number, timeZone: string, includeDate = true): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone,
@@ -324,6 +365,12 @@ export function ResultDetailChart({
   const showGapChart = Boolean(gapWindow);
   const linRegIndicator = indicatorDetails.find((item) => item.name === "linreg_candles");
   const adxIndicator = indicatorDetails.find((item) => item.name === "adx");
+  const emaIndicator = indicatorDetails.find((item) => item.name === "ema");
+  const emaOverlay = useMemo(
+    () => resolveEmaOverlay(emaIndicator, completedCandles),
+    [emaIndicator, completedCandles],
+  );
+  const showEmaChart = Boolean(emaIndicator);
   const channelVisibility = useMemo(
     () => resolveChartChannelVisibility(indicatorDetails, requestFilters),
     [indicatorDetails, requestFilters],
@@ -393,6 +440,7 @@ export function ResultDetailChart({
       || (mode === "linreg" && Boolean(linRegIndicator))
       || (mode === "adr" && showAdrChart)
       || (mode === "gap" && showGapChart)
+      || (mode === "ema" && showEmaChart)
     );
     if (!modeAvailable) setMode(initialMode);
   }, [
@@ -401,6 +449,7 @@ export function ResultDetailChart({
     mode,
     showAdrChart,
     showConfluenceChart,
+    showEmaChart,
     showGapChart,
     showLrcChart,
     showRegressionChart,
@@ -434,7 +483,19 @@ export function ResultDetailChart({
   );
   const adrCandleReasons = useMemo(() => resolveAdrCandleReasons(adrWindow), [adrWindow]);
   const gapCandleReasons = useMemo(() => resolveGapCandleReasons(gapWindow), [gapWindow]);
-  const candleReasons = mode === "confluence"
+  const trendyAdxDirectionCandleReasons = useMemo(
+    () => resolveTrendyAdxDirectionCandleReasons(indicatorDetails, completedCandles),
+    [indicatorDetails, completedCandles],
+  );
+  const trendyAdxDirectionStreaks = useMemo(
+    () => resolveTrendyAdxDirectionStreaks(indicatorDetails),
+    [indicatorDetails],
+  );
+  const emaCandleReasons = useMemo(
+    () => resolveEmaCandleReasons(emaOverlay, completedCandles),
+    [emaOverlay, completedCandles],
+  );
+  const baseCandleReasons = mode === "confluence"
     ? confluenceCandleReasons
     : mode === "adr"
       ? adrCandleReasons
@@ -443,6 +504,10 @@ export function ResultDetailChart({
         : interactionCandleReasons.size
           ? interactionCandleReasons
           : channelRespectCandleReasons;
+  const extraCandleReasons = mergeCandleReasons(trendyAdxDirectionCandleReasons, emaCandleReasons);
+  const candleReasons = extraCandleReasons.size
+    ? mergeCandleReasons(extraCandleReasons, baseCandleReasons)
+    : baseCandleReasons;
   const precision = useMemo(() => inferPricePrecision(source), [source]);
   const selectedIndex = useMemo(() => {
     if (hoveredTime === null) return Math.max(0, source.length - 1);
@@ -450,14 +515,30 @@ export function ResultDetailChart({
     return index >= 0 ? index : Math.max(0, source.length - 1);
   }, [hoveredTime, source]);
   const selected = source[selectedIndex];
-  const selectedAdx = useMemo(() => {
+  const selectedAdxIndex = useMemo(() => {
     if (hoveredTime === null) {
-      return [...adxPoints].reverse().find((point) => (
-        point.plusDi !== null || point.minusDi !== null || point.adx !== null
-      ));
+      for (let index = adxPoints.length - 1; index >= 0; index -= 1) {
+        const point = adxPoints[index];
+        if (point.plusDi !== null || point.minusDi !== null || point.adx !== null) return index;
+      }
+      return -1;
     }
-    return adxPoints.find((point) => point.time === hoveredTime);
+    return adxPoints.findIndex((point) => point.time === hoveredTime);
   }, [adxPoints, hoveredTime]);
+  const selectedAdx = selectedAdxIndex >= 0 ? adxPoints[selectedAdxIndex] : undefined;
+  const previousAdx = selectedAdxIndex > 0 ? adxPoints[selectedAdxIndex - 1] : undefined;
+  const adxDirectionIndicator = useMemo(
+    () => directionIndicator(selectedAdx?.adx, previousAdx?.adx),
+    [selectedAdx, previousAdx],
+  );
+  const diPlusDirectionIndicator = useMemo(
+    () => directionIndicator(selectedAdx?.plusDi, previousAdx?.plusDi),
+    [selectedAdx, previousAdx],
+  );
+  const diMinusDirectionIndicator = useMemo(
+    () => directionIndicator(selectedAdx?.minusDi, previousAdx?.minusDi),
+    [selectedAdx, previousAdx],
+  );
   const showAdxPane = Boolean(
     adxIndicator
     && mode !== "adr"
@@ -506,6 +587,14 @@ export function ResultDetailChart({
   const selectedAdrRange = mode === "adr" && adrWindow
     ? adrWindow.ranges[selectedIndex] ?? null
     : null;
+  const selectedEma = mode === "ema" && selected
+    ? emaOverlay.map((period) => ({
+        period: period.period,
+        color: period.color,
+        value: period.values[selectedIndex] ?? null,
+        previousValue: selectedIndex > 0 ? period.values[selectedIndex - 1] ?? null : null,
+      }))
+    : [];
   const selectedGap = mode === "gap" && gapWindow && selected
     ? gapWindow.gaps.find((gap) => gap.time === selected.time) ?? null
     : null;
@@ -548,7 +637,7 @@ export function ResultDetailChart({
         lockVisibleTimeRangeOnResize: false,
         tickMarkFormatter: (time) => new Intl.DateTimeFormat(undefined, {
           timeZone,
-          ...(timeframe.includes("day")
+          ...(isDateGranularityTimeframe(timeframe)
             ? { month: "short", day: "numeric" }
             : { hour: "2-digit", minute: "2-digit", hour12: false }),
         }).format(new Date(unixTime(time) * 1000)),
@@ -626,7 +715,7 @@ export function ResultDetailChart({
             lockVisibleTimeRangeOnResize: false,
             tickMarkFormatter: (time) => new Intl.DateTimeFormat(undefined, {
               timeZone,
-              ...(timeframe.includes("day")
+              ...(isDateGranularityTimeframe(timeframe)
                 ? { month: "short", day: "numeric" }
                 : { hour: "2-digit", minute: "2-digit", hour12: false }),
             }).format(new Date(unixTime(time) * 1000)),
@@ -725,15 +814,63 @@ export function ResultDetailChart({
           priceFormat: { type: "price", precision: 3, minMove: 0.001 },
         });
         series.setData(data);
+        return series;
+      };
+
+      // Prints the actual value on every candle of the current direction
+      // streak (from the adx/di_plus/di_minus direction filter evidence), so
+      // the up/down/flat direction is read directly off the numbers instead
+      // of eyeballed off the line's slope.
+      const addDirectionValueMarkers = (
+        series: ReturnType<typeof addAdxLine>,
+        field: "plusDi" | "minusDi" | "adx",
+        lineKey: "di_plus" | "di_minus" | "adx",
+        color: string,
+      ) => {
+        const streak = trendyAdxDirectionStreaks.find((item) => item.line === lineKey);
+        if (!streak) return;
+        const inStreak = adxPoints.filter((point) => (
+          point[field] !== null && point.time >= streak.startTime && point.time <= streak.endTime
+        ));
+        if (!inStreak.length) return;
+
+        // Labeling every candle in a long streak turns into an unreadable pile of
+        // overlapping digits - just the streak's start and end value is enough to
+        // show "went from X to Y", and stays legible at any zoom level.
+        const first = inStreak[0];
+        const last = inStreak[inStreak.length - 1];
+        const markers: SeriesMarker<UTCTimestamp>[] = [];
+        const pushMarker = (point: TrendyAdxPoint, position: "atPriceTop" | "atPriceBottom") => {
+          const value = point[field];
+          if (value === null) return;
+          markers.push({
+            time: point.time as UTCTimestamp,
+            position,
+            price: value,
+            color,
+            shape: "circle",
+            size: 0,
+            text: value.toFixed(1),
+          });
+        };
+        pushMarker(first, "atPriceBottom");
+        if (last.time !== first.time) pushMarker(last, "atPriceTop");
+        // autoScale:false - these markers must never influence the pane's price
+        // range. With it left on (the default), the y-axis re-fits to whichever
+        // markers are currently in view, so it visibly jitters while panning.
+        if (markers.length) createSeriesMarkers(series, markers, { autoScale: false });
       };
 
       addAdxLine(ADX_THRESHOLD_COLOR, 1, LineStyle.Dashed, adxPoints.map((point) => ({
         time: point.time as UTCTimestamp,
         value: adxThreshold,
       })));
-      addAdxLine(ADX_PLUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "plusDi"), true);
-      addAdxLine(ADX_MINUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "minusDi"), true);
-      addAdxLine(ADX_STRENGTH_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "adx"), true);
+      const plusSeries = addAdxLine(ADX_PLUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "plusDi"), true);
+      const minusSeries = addAdxLine(ADX_MINUS_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "minusDi"), true);
+      const strengthSeries = addAdxLine(ADX_STRENGTH_COLOR, 2, LineStyle.Solid, adxLineData(adxPoints, "adx"), true);
+      addDirectionValueMarkers(plusSeries, "plusDi", "di_plus", ADX_PLUS_COLOR);
+      addDirectionValueMarkers(minusSeries, "minusDi", "di_minus", ADX_MINUS_COLOR);
+      addDirectionValueMarkers(strengthSeries, "adx", "adx", ADX_STRENGTH_COLOR);
     }
 
     if (adrChart && adrWindow) {
@@ -903,6 +1040,16 @@ export function ResultDetailChart({
       addLine(TREND_BOTTOM_COLOR, 2, LineStyle.Solid, buildTrendLineData(source, trendChannel, "bottom"), true);
     }
 
+    if (mode === "ema") {
+      emaOverlay.forEach((period) => {
+        const lineData: LineData<UTCTimestamp>[] = source.flatMap((candle, candleIndex) => {
+          const value = period.values[candleIndex];
+          return value === null ? [] : [{ time: candle.time as UTCTimestamp, value }];
+        });
+        addLine(period.color, 2, LineStyle.Solid, lineData, true);
+      });
+    }
+
     if (mode === "confluence") {
       const sourceLineData = (
         confluenceSource: ConfluenceChartSource,
@@ -1021,7 +1168,7 @@ export function ResultDetailChart({
       chart.remove();
       setCandleTooltip(null);
     };
-  }, [adrWindow, adxPoints, gapWindow, adxThreshold, adxTopLevel, candleReasons, confluenceSources, lrcChannel, mode, precision, range, regressionChannel, showAdrPane, showAdxPane, showGapPane, source, timeZone, timeframe, trendChannel]);
+  }, [adrWindow, adxPoints, gapWindow, adxThreshold, adxTopLevel, candleReasons, confluenceSources, emaOverlay, lrcChannel, mode, precision, range, regressionChannel, showAdrPane, showAdxPane, showGapPane, source, timeZone, timeframe, trendChannel, trendyAdxDirectionStreaks]);
 
   if (!completedCandles.length) {
     return (
@@ -1137,6 +1284,16 @@ export function ResultDetailChart({
             >
               <LineChart className="h-3.5 w-3.5" />
               LinReg Candles
+            </button>
+          ) : null}
+          {showEmaChart ? (
+            <button
+              type="button"
+              onClick={() => setMode("ema")}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${mode === "ema" ? "bg-[#2962ff] text-white" : "text-[#b2b5be] hover:bg-[#2a2e39]"}`}
+            >
+              <LineChart className="h-3.5 w-3.5" />
+              EMA
             </button>
           ) : null}
           {showAdrChart ? (
@@ -1269,6 +1426,14 @@ export function ResultDetailChart({
             {selectedTrend?.middle != null ? <span style={{ color: TREND_CENTER_COLOR }}>Middle {formatPrice(selectedTrend.middle, precision)}</span> : null}
             {selectedTrend?.bottomZoneUpper != null ? <span style={{ color: TREND_BOTTOM_COLOR }}>Bottom Zone {formatPrice(selectedTrend.bottomZoneUpper, precision)}</span> : null}
             {selectedTrend?.bottom != null ? <span style={{ color: TREND_BOTTOM_COLOR }}>Bottom {formatPrice(selectedTrend.bottom, precision)}</span> : null}
+            {selectedEma.map(({ period, color, value, previousValue }) => (
+              value == null ? null : (
+                <span key={period} style={{ color }}>
+                  EMA {period} {formatPrice(value, precision)}
+                  <DirectionBadge indicator={directionIndicator(value, previousValue)} />
+                </span>
+              )
+            ))}
             {selectedConfluence.map(({ source: confluenceSource, lower, mid, upper }, index) => {
               const value = mid ?? lower ?? upper;
               if (value == null) return null;
@@ -1328,9 +1493,24 @@ export function ResultDetailChart({
           />
           <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 font-mono text-sm font-semibold text-[#d1d4dc]">
             <span>Trendy ADX</span>
-            {selectedAdx?.adx != null ? <span style={{ color: ADX_STRENGTH_COLOR }}>{selectedAdx.adx.toFixed(3)}</span> : null}
-            {selectedAdx?.minusDi != null ? <span style={{ color: ADX_MINUS_COLOR }}>{selectedAdx.minusDi.toFixed(3)}</span> : null}
-            {selectedAdx?.plusDi != null ? <span style={{ color: ADX_PLUS_COLOR }}>{selectedAdx.plusDi.toFixed(3)}</span> : null}
+            {selectedAdx?.adx != null ? (
+              <span style={{ color: ADX_STRENGTH_COLOR }}>
+                ADX {selectedAdx.adx.toFixed(3)}
+                <DirectionBadge indicator={adxDirectionIndicator} />
+              </span>
+            ) : null}
+            {selectedAdx?.minusDi != null ? (
+              <span style={{ color: ADX_MINUS_COLOR }}>
+                -DI {selectedAdx.minusDi.toFixed(3)}
+                <DirectionBadge indicator={diMinusDirectionIndicator} />
+              </span>
+            ) : null}
+            {selectedAdx?.plusDi != null ? (
+              <span style={{ color: ADX_PLUS_COLOR }}>
+                +DI {selectedAdx.plusDi.toFixed(3)}
+                <DirectionBadge indicator={diPlusDirectionIndicator} />
+              </span>
+            ) : null}
           </div>
         </div>
       ) : null}

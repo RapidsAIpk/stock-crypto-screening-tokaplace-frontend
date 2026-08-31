@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FieldLabel } from "./FilterUi";
 
 const inputClass =
-  "w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed";
+  "w-full rounded-md border border-border bg-secondary px-3 py-2 text-[16px] sm:text-sm text-foreground disabled:cursor-not-allowed";
 
 interface PresetOrCustomProps {
   label: string;

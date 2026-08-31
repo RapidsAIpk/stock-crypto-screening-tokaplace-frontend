@@ -558,7 +558,7 @@ export function IndicatorsFilter({
                                 }
                               }
                             }}
-                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                           />
                         )}
                         {field.type === "text" && (
@@ -567,7 +567,7 @@ export function IndicatorsFilter({
                             value={(ind.config[field.key] as string) ?? ""}
                             onChange={(e) => updateConfig(idx, field.key, e.target.value)}
                             placeholder={field.key === "session" ? "0000-0000" : undefined}
-                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                           />
                         )}
                         {field.type === "boolean" && (ind.name === "adx" || ind.name === "volume" || ind.name === "current_volume" || ind.name === "volatility") && (
@@ -641,7 +641,7 @@ export function IndicatorsFilter({
                               }
                               updateConfig(idx, field.key, e.target.value || null);
                             }}
-                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                           >
                             <option value="">Auto</option>
                             {field.options?.map((opt) => (
@@ -733,7 +733,7 @@ export function IndicatorsFilter({
                                             : nextAction,
                                         });
                                       }}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                     >
                                       {TREND_CHANNEL_AREAS.map((option) => (
                                         <option key={option} value={option}>{formatOptionLabel("area", option)}</option>
@@ -769,7 +769,7 @@ export function IndicatorsFilter({
                                           ...patch,
                                         });
                                       }}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                     >
                                       {trendActionsForArea(area.area).map((option) => (
                                         <option key={option} value={option}>{formatOptionLabel("action", option)}</option>
@@ -796,7 +796,7 @@ export function IndicatorsFilter({
                                         onChange={(e) => updateAreaRulePatch(idx, areaIdx, { touch_type: e.target.value })}
                                         disabled={!touchTypeActive}
                                         title={touchTypeActive ? undefined : "Ignored unless the action checks a touch/entry/rejection overlap."}
-                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                       >
                                         {["wick", "body", "both"].map((option) => (
                                           <option key={option} value={option}>{option}</option>
@@ -812,7 +812,7 @@ export function IndicatorsFilter({
                                         onChange={(e) => updateAreaRulePatch(idx, areaIdx, { breach_type: e.target.value })}
                                         disabled={!breachControlsActive}
                                         title={breachControlsActive ? undefined : "Ignored unless Action is breach."}
-                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                       >
                                         {["wick", "body", "both"].map((option) => (
                                           <option key={option} value={option}>{option}</option>
@@ -828,7 +828,7 @@ export function IndicatorsFilter({
                                         onChange={(e) => updateAreaRule(idx, areaIdx, "breach_direction", e.target.value)}
                                         disabled={!breachControlsActive}
                                         title={breachControlsActive ? undefined : "Ignored unless Action is breach."}
-                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                       >
                                         {["any", "up", "down"].map((option) => (
                                           <option key={option} value={option}>{option}</option>
@@ -850,7 +850,7 @@ export function IndicatorsFilter({
                                             updateAreaRule(idx, areaIdx, "window", 1);
                                           }
                                         }}
-                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                        className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                       />
                                     </div>
                                   )}
@@ -867,7 +867,7 @@ export function IndicatorsFilter({
                                               updateAreaRule(idx, areaIdx, "candles_since_min", 0);
                                             }
                                           }}
-                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                         />
                                       </div>
                                       <div className="space-y-1">
@@ -881,7 +881,7 @@ export function IndicatorsFilter({
                                               updateAreaRule(idx, areaIdx, "candles_since_max", 5);
                                             }
                                           }}
-                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                         />
                                       </div>
                                     </>
@@ -899,7 +899,7 @@ export function IndicatorsFilter({
                                               updateAreaRule(idx, areaIdx, "min_consecutive_below", 1);
                                             }
                                           }}
-                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                         />
                                       </div>
                                       <div className="space-y-1">
@@ -925,7 +925,7 @@ export function IndicatorsFilter({
                                           updateAreaRule(idx, areaIdx, "tolerance", 0);
                                         }
                                       }}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                     />
                                   </div>
                                   <div className="space-y-1">
@@ -954,7 +954,7 @@ export function IndicatorsFilter({
                                       }}
                                       disabled={!confirmationCriteriaActive}
                                       title={confirmationCriteriaActive ? undefined : "Ignored unless Require Confirmation is enabled."}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                     >
                                       <option value="">Auto</option>
                                       {CONFIRMATION_TYPES.map((option) => (
@@ -975,7 +975,7 @@ export function IndicatorsFilter({
                                       }}
                                       disabled={!confirmationWindowActive}
                                       title={confirmationWindowActive ? undefined : "Ignored until confirmation is enabled and a confirmation type or pattern is selected."}
-                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs text-foreground"
+                                      className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                     />
                                   </div>
                                   <div className={`space-y-1 col-span-2 ${inactiveTrendSubfilterClass(!confirmationCriteriaActive)}`}>
@@ -1079,7 +1079,7 @@ export function IndicatorsFilter({
                                                   onChange={(event) =>
                                                     updateAdxConditionSub(idx, conditionDef.id, { direction: event.target.value as TrendyAdxCondition["direction"] })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 >
                                                   {TRENDY_ADX_DIRECTIONS.map((direction) => (
                                                     <option key={direction} value={direction}>
@@ -1100,7 +1100,7 @@ export function IndicatorsFilter({
                                                       candles_since_direction_change_min: next,
                                                     })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 />
                                               </div>
                                               <div className="space-y-1">
@@ -1115,7 +1115,7 @@ export function IndicatorsFilter({
                                                       candles_since_direction_change_max: next,
                                                     })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 />
                                               </div>
                                             </div>
@@ -1134,7 +1134,7 @@ export function IndicatorsFilter({
                                                       candles_since_min: next,
                                                     })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 />
                                               </div>
                                               <div className="space-y-1">
@@ -1149,7 +1149,7 @@ export function IndicatorsFilter({
                                                       candles_since_max: next,
                                                     })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 />
                                               </div>
                                             </div>
@@ -1168,7 +1168,7 @@ export function IndicatorsFilter({
                                                       active_candles_min: next,
                                                     })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 />
                                               </div>
                                               <div className="space-y-1">
@@ -1183,7 +1183,7 @@ export function IndicatorsFilter({
                                                       active_candles_max: next,
                                                     })
                                                   }
-                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+                                                  className="w-full rounded-md border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                                 />
                                               </div>
                                             </div>

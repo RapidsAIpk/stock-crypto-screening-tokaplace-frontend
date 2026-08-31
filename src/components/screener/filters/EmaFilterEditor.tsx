@@ -14,6 +14,7 @@ import type {
 } from "@/types/screener";
 import { Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { ClearableNumberInput } from "./ClearableNumberInput";
 
 interface Props {
   config: Record<string, unknown>;
@@ -155,7 +156,7 @@ export function EmaFilterEditor({ config, onChange }: Props) {
               }
             }}
             placeholder="Custom"
-            className="min-w-0 flex-1 rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground"
+            className="min-w-0 flex-1 rounded border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground"
           />
           <button
             type="button"
@@ -236,24 +237,24 @@ export function EmaFilterEditor({ config, onChange }: Props) {
                 <div className={`grid grid-cols-2 gap-2 pl-6 ${active ? "" : "opacity-45"}`}>
                   <div className="space-y-1">
                     <div className="text-[10px] text-muted-foreground">Candles Since Min</div>
-                    <input
-                      type="number"
-                      min={0}
+                    <ClearableNumberInput
                       value={condition.candles_since_min}
+                      fallback={DEFAULT_EMA_CONDITIONS[name].candles_since_min}
+                      min={0}
                       disabled={!active}
-                      onChange={(event) => updateCondition(name, { candles_since_min: Number(event.target.value) })}
-                      className="w-full rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
+                      onCommit={(next) => updateCondition(name, { candles_since_min: next })}
+                      className="w-full rounded border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground disabled:cursor-not-allowed"
                     />
                   </div>
                   <div className="space-y-1">
                     <div className="text-[10px] text-muted-foreground">Candles Since Max</div>
-                    <input
-                      type="number"
-                      min={condition.candles_since_min}
+                    <ClearableNumberInput
                       value={condition.candles_since_max}
+                      fallback={DEFAULT_EMA_CONDITIONS[name].candles_since_max}
+                      min={condition.candles_since_min}
                       disabled={!active}
-                      onChange={(event) => updateCondition(name, { candles_since_max: Number(event.target.value) })}
-                      className="w-full rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed"
+                      onCommit={(next) => updateCondition(name, { candles_since_max: next })}
+                      className="w-full rounded border border-border bg-secondary px-2 py-1 text-[16px] sm:text-xs text-foreground disabled:cursor-not-allowed"
                     />
                   </div>
                   {name === "touched_or_pierced_and_closed_above" && (
