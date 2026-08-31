@@ -24,7 +24,7 @@ import type {
   ScreenerResultExportEntry,
 } from "@/types/screener";
 import { DEFAULT_ADR_FILTER, DEFAULT_DEAD_ASSETS_FILTER, DEFAULT_GAP_EXCLUSION_FILTER, STOCK_ASSET_CATEGORIES, STOCK_SECTORS } from "@/types/screener";
-import { adrFilterError, gapExclusionFilterError, normalizeAdrFilter, normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeGapExclusionFilter, normalizeIndicatorConfig } from "@/types/screener";
+import { adrFilterError, gapExclusionFilterError, normalizeAdrFilter, normalizeConfluenceConfig, normalizeDeadAssetsFilter, normalizeGapExclusionFilter, normalizeIndicatorConfig, resolvePhase2ChannelFieldsForRequest } from "@/types/screener";
 import type { FilterSnapshot } from "@/hooks/useUserSettings";
 import { useScanProgress } from "@/hooks/useScanProgress";
 import { appEnv } from "@/config/env";
@@ -440,7 +440,25 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
   }, []);
 
   function buildRequestSnapshot(): ScreenerRequest {
-    const safeIndicators = sanitizeIndicators(indicators);
+    // sanitizeIndicators intentionally leaves an explicitly-cleared Phase 2
+    // range field (candles_since_min/max, window, etc.) as `null` so the user
+    // can actually empty the box while typing. Resolve those to their
+    // defaults only now, right before the scan actually runs.
+    const safeIndicators = sanitizeIndicators(indicators).map((indicator) => {
+      if (indicator.name === "lrc" || indicator.name === "regression") {
+        return { ...indicator, config: resolvePhase2ChannelFieldsForRequest(indicator.config) };
+      }
+      if (indicator.name === "trend" && Array.isArray(indicator.config.areas)) {
+        return {
+          ...indicator,
+          config: {
+            ...indicator.config,
+            areas: (indicator.config.areas as Record<string, unknown>[]).map(resolvePhase2ChannelFieldsForRequest),
+          },
+        };
+      }
+      return indicator;
+    });
     const safeConfluence = normalizeConfluenceConfig(confluence);
     const normalizedCryptoExchanges = normalizeCryptoExchangeSelection(
       cryptoExchanges,

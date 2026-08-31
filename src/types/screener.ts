@@ -2250,6 +2250,40 @@ function normalizePhase2ChannelFields(config: Record<string, unknown>): Record<s
     return config;
   }
 
+  // Only fill a default when the field has never been set (undefined) - once
+  // the user explicitly clears a field to empty, its value becomes `null`,
+  // which must be left alone here. This function re-runs on every keystroke
+  // (via setIndicators -> sanitizeIndicators -> normalizeIndicatorConfig), so
+  // treating `null` the same as `undefined` (e.g. via `??`) would force the
+  // default straight back in the instant the field goes empty - making it
+  // impossible to ever clear. Any field still `null` when the scan actually
+  // runs is resolved to its default at that point (see resolvePhase2ChannelFieldsForRequest).
+  const next: Record<string, unknown> = { ...config };
+  if (!("candles_since_min" in config)) next.candles_since_min = 0;
+  if (!("candles_since_max" in config)) next.candles_since_max = 5;
+  if (!("window" in config)) next.window = 1;
+
+  if (isReclaimChannelAction(action)) {
+    if (!("min_consecutive_below" in config)) next.min_consecutive_below = 1;
+    if (!("below_candles_min" in config)) next.below_candles_min = 1;
+    if (!("below_candles_max" in config)) next.below_candles_max = 5;
+    if (!("require_still_above_now" in config)) next.require_still_above_now = true;
+  }
+
+  return next;
+}
+
+/**
+ * Resolves any explicitly-cleared (`null`) Phase 2 range fields to their
+ * defaults - called only when actually building the scan request, so a field
+ * left empty by the user still behaves sensibly instead of being sent as null.
+ */
+export function resolvePhase2ChannelFieldsForRequest(config: Record<string, unknown>): Record<string, unknown> {
+  const action = String(config.action ?? "").trim().toLowerCase();
+  if (!isPhase2ChannelAction(action)) {
+    return config;
+  }
+
   const next: Record<string, unknown> = {
     ...config,
     candles_since_min: config.candles_since_min ?? 0,
