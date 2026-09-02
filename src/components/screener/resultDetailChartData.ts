@@ -98,6 +98,49 @@ export function normalizeMarketCandles(
   return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
+export function timeframeToSeconds(value: string): number | null {
+  const lowered = String(value || "").trim().toLowerCase();
+  const fixed: Record<string, number> = {
+    "1m": 60,
+    "5m": 5 * 60,
+    "15m": 15 * 60,
+    "30m": 30 * 60,
+    "1h": 60 * 60,
+    "4h": 4 * 60 * 60,
+    "1day": 24 * 60 * 60,
+  };
+
+  if (fixed[lowered]) return fixed[lowered];
+
+  const match = lowered.match(/^(\d+)\s*(m|h|d|w|mo|day)$/);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const unit = match[2] === "day" ? "d" : match[2];
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  if (unit === "m") return amount * 60;
+  if (unit === "h") return amount * 60 * 60;
+  if (unit === "d") return amount * 24 * 60 * 60;
+  if (unit === "w") return amount * 7 * 24 * 60 * 60;
+  return amount * 30 * 24 * 60 * 60;
+}
+
+export function filterCompletedCandles(
+  candles: MarketCandle[],
+  timeframe: string,
+  nowMs = Date.now(),
+): MarketCandle[] {
+  const seconds = timeframeToSeconds(timeframe);
+  const nowSeconds = Math.floor(nowMs / 1000);
+
+  return candles.filter((candle) => {
+    if (candle.is_closed === false) return false;
+    if (!seconds) return true;
+    return candle.time + seconds <= nowSeconds;
+  });
+}
+
 export function normalizeRegressionChannel(
   channels: Record<string, unknown> | null | undefined,
 ): RegressionChannelSeries | null {

@@ -374,9 +374,10 @@ export function useScreener(accountRuntimeConfig?: ScreenerAccountRuntimeConfig)
         }
 
         const data = await response.json() as CryptoExchangeOptionsResponse;
+        const exchanges = Array.isArray(data.exchanges) ? data.exchanges : [];
         if (!cancelled) {
           setAvailableCryptoExchanges(
-            data.exchanges
+            exchanges
               .map((option) => ({
                 exchange: String(option.exchange || "").trim().toLowerCase(),
                 coin_count: Number.isFinite(option.coin_count) ? option.coin_count : 0,

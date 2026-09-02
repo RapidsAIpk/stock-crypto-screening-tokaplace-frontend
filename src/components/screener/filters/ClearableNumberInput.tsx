@@ -7,6 +7,7 @@ interface Props {
   step?: number;
   className?: string;
   disabled?: boolean;
+  "aria-label"?: string;
   onCommit: (value: number) => void;
 }
 
@@ -26,6 +27,7 @@ export function ClearableNumberInput({
   step,
   className,
   disabled,
+  "aria-label": ariaLabel,
   onCommit,
 }: Props) {
   const [rawText, setRawText] = useState(String(value ?? fallback));
@@ -51,6 +53,7 @@ export function ClearableNumberInput({
       step={step}
       value={rawText}
       disabled={disabled}
+      aria-label={ariaLabel}
       onChange={(event) => setRawText(event.target.value)}
       onBlur={(event) => commit(event.target.value)}
       className={className}

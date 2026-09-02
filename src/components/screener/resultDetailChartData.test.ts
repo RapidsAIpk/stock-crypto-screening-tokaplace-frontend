@@ -3,6 +3,7 @@ import type { MarketCandle } from "@/types/screener";
 import {
   confluenceValueAt,
   createLinearRegressionCandles,
+  filterCompletedCandles,
   normalizeConfluenceChartSources,
   normalizeLrcChannel,
   normalizeMarketCandles,
@@ -232,6 +233,34 @@ describe("result detail chart candle data", () => {
       volume: 150,
       is_closed: false,
     });
+  });
+
+  it("filters out candles explicitly marked as not closed", () => {
+    const candles: MarketCandle[] = [
+      { time: 1_000, open: 10, high: 12, low: 9, close: 11, is_closed: true },
+      { time: 1_060, open: 11, high: 13, low: 10, close: 12, is_closed: false },
+    ];
+
+    expect(filterCompletedCandles(candles, "1m", 1_200_000).map((candle) => candle.time)).toEqual([1_000]);
+  });
+
+  it("infers and removes the still-forming latest candle from the selected timeframe", () => {
+    const candles: MarketCandle[] = [
+      { time: 1_000, open: 10, high: 12, low: 9, close: 11 },
+      { time: 1_060, open: 11, high: 13, low: 10, close: 12 },
+      { time: 1_120, open: 12, high: 14, low: 11, close: 13 },
+    ];
+
+    expect(filterCompletedCandles(candles, "1m", 1_150_000).map((candle) => candle.time)).toEqual([1_000, 1_060]);
+  });
+
+  it("keeps the latest candle once its timeframe has completed", () => {
+    const candles: MarketCandle[] = [
+      { time: 1_000, open: 10, high: 12, low: 9, close: 11 },
+      { time: 1_060, open: 11, high: 13, low: 10, close: 12 },
+    ];
+
+    expect(filterCompletedCandles(candles, "1m", 1_120_000).map((candle) => candle.time)).toEqual([1_000, 1_060]);
   });
 
   it("matches endpoint linear regression and SMA values and skips a forming bar", () => {
