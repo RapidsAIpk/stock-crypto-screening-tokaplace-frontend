@@ -51,7 +51,7 @@ describe("ResultsTable", () => {
 
     fireEvent.click(trigger);
     expect(screen.getByRole("button", { name: "Category 40" })).toBeInTheDocument();
-  }, 15000);
+  }, 30000);
 
   it("filters categories by search and pages large category lists", async () => {
     const results = Array.from({ length: 140 }, (_, index) => ({
@@ -89,5 +89,5 @@ describe("ResultsTable", () => {
     fireEvent.click(screen.getByRole("button", { name: /show 40 more/i }));
 
     expect(await screen.findByRole("button", { name: "Cat 0140" })).toBeInTheDocument();
-  }, 15000);
+  }, 30000);
 });

@@ -35,6 +35,7 @@ import {
   CONFLUENCE_SOURCE_COLORS,
   createLinearRegressionCandles,
   EMA_EVENT_HIGHLIGHT_COLOR,
+  filterCompletedCandles,
   LIQUIDITY_SWEEP_HIGHLIGHT_COLOR,
   mergeCandleReasons,
   normalizeAdrChartWindow,
@@ -348,8 +349,8 @@ export function ResultDetailChart({
   const resetViewRef = useRef<() => void>(() => undefined);
   const candles = useMemo(() => normalizeMarketCandles(rawCandles), [rawCandles]);
   const completedCandles = useMemo(
-    () => candles.filter((candle) => candle.is_closed !== false),
-    [candles],
+    () => filterCompletedCandles(candles, timeframe),
+    [candles, timeframe],
   );
   const lrcChannel = useMemo(() => normalizeLrcChannel(channels), [channels]);
   const regressionChannel = useMemo(() => normalizeRegressionChannel(channels), [channels]);
@@ -429,6 +430,26 @@ export function ResultDetailChart({
   const [range, setRange] = useState<RangeOption>(100);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   const [candleTooltip, setCandleTooltip] = useState<CandleTooltipState | null>(null);
+  const autoModeKeyRef = useRef("");
+  const autoModeKey = [
+    symbol,
+    timeframe,
+    initialMode,
+    showLrcChart ? "lrc" : "",
+    showRegressionChart ? "regression" : "",
+    showTrendChart ? "trend" : "",
+    showEmaChart ? "ema" : "",
+    showAdrChart ? "adr" : "",
+    showGapChart ? "gap" : "",
+    showConfluenceChart ? "confluence" : "",
+    linRegIndicator ? "linreg" : "",
+  ].join("|");
+
+  useEffect(() => {
+    if (autoModeKeyRef.current === autoModeKey) return;
+    autoModeKeyRef.current = autoModeKey;
+    setMode(initialMode);
+  }, [autoModeKey, initialMode]);
 
   useEffect(() => {
     const modeAvailable = (
@@ -1200,6 +1221,9 @@ export function ResultDetailChart({
           </div>
           <span className="font-mono text-sm font-semibold text-white">{symbol}</span>
           <span className="rounded bg-[#1e222d] px-2 py-1 text-xs font-semibold text-[#d1d4dc]">{timeframe}</span>
+          <span className="hidden rounded bg-[#13251f] px-2 py-1 text-[10px] font-semibold uppercase text-[#22c55e] sm:inline-flex">
+            Completed candles only
+          </span>
           <span className="hidden items-center gap-1 text-[10px] uppercase text-[#089981] sm:flex">
             <Radio className="h-3 w-3" />
             {provider || "market data"}

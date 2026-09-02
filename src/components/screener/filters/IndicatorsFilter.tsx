@@ -99,9 +99,11 @@ const FIELD_HELP_TEXT: Record<string, string> = {
   price_position: "Where the LinReg candle sits vs the white signal line.",
   close_location: "Optional extra check on LinReg close. “Any” skips this check.",
   selection_mode: "How selected channel lines or area rules are combined.",
-  candles_since_min: "Earliest matching candle age allowed for the selected Phase 2 action.",
-  candles_since_max: "Oldest matching candle age allowed for the selected Phase 2 action.",
+  candles_since_min: "Minimum candles since the selected channel event happened.",
+  candles_since_max: "Maximum candles since the selected channel event happened.",
   min_consecutive_below: "Minimum consecutive candles below the channel before a reclaim can pass.",
+  below_candles_min: "Minimum candles price stayed below the line before reclaiming.",
+  below_candles_max: "Maximum candles price stayed below the line before reclaiming.",
   require_still_above_now: "Requires price to still be above the reclaimed line now.",
 };
 
@@ -213,7 +215,45 @@ function formatOptionLabel(fieldKey: string, option: string): string {
     return "Disabled";
   }
 
+  if (option === "reclaimed_from_below_bullish") {
+    return "reclaimed from below + closed above";
+  }
+
+  if (option === "rejected_from_above_bullish") {
+    return "rejected from above";
+  }
+
+  if (option === "rejected_from_below_bearish") {
+    return "rejected from below";
+  }
+
+  if (option === "piercing_from_below") {
+    return "piercing from below";
+  }
+
   return option.replace(/_/g, " ");
+}
+
+const CHANNEL_PHASE2_NUMBER_DEFAULTS: Record<string, number> = {
+  candles_since_min: 0,
+  candles_since_max: 5,
+  below_candles_min: 1,
+  below_candles_max: 5,
+  min_consecutive_below: 1,
+};
+
+function isChannelPhase2NumberField(fieldKey: string): boolean {
+  return Object.prototype.hasOwnProperty.call(CHANNEL_PHASE2_NUMBER_DEFAULTS, fieldKey);
+}
+
+function channelPhase2FieldLabel(config: Record<string, unknown>, fieldKey: string, fallback: string): string {
+  const isReclaim = isReclaimChannelAction(config.action);
+  if (fieldKey === "candles_since_min") return isReclaim ? "Candles Since Reclaim Min" : fallback;
+  if (fieldKey === "candles_since_max") return isReclaim ? "Candles Since Reclaim Max" : fallback;
+  if (fieldKey === "min_consecutive_below") return "Minimum Consecutive Below";
+  if (fieldKey === "below_candles_min") return "Below Candles Min";
+  if (fieldKey === "below_candles_max") return "Below Candles Max";
+  return fallback;
 }
 
 export function IndicatorsFilter({
@@ -517,6 +557,9 @@ export function IndicatorsFilter({
                         return null;
                       }
                       const helpText = fieldHelpText(ind, field.key);
+                      const displayLabel = (ind.name === "lrc" || ind.name === "regression")
+                        ? channelPhase2FieldLabel(ind.config, field.key, field.label)
+                        : field.label;
                       const showSectionHeading =
                         field.section
                         && def.fields
@@ -533,11 +576,22 @@ export function IndicatorsFilter({
                       <div
                         className={`space-y-1 ${field.type === "area-list" || field.type === "condition-list" ? "col-span-2" : ""}`}
                       >
-                        <div className="text-[10px] text-muted-foreground">{field.label}</div>
+                        <div className="text-[10px] text-muted-foreground">{displayLabel}</div>
                         {helpText && (
                           <div className="text-[9px] text-muted-foreground/80">{helpText}</div>
                         )}
-                        {field.type === "number" && (
+                        {field.type === "number" && (ind.name === "lrc" || ind.name === "regression") && isChannelPhase2NumberField(field.key) && (
+                          <ClearableNumberInput
+                            value={ind.config[field.key] as number | null | undefined}
+                            fallback={CHANNEL_PHASE2_NUMBER_DEFAULTS[field.key]}
+                            min={field.min ?? 0}
+                            step={field.step}
+                            aria-label={`${INDICATOR_LABELS[ind.name]} ${displayLabel}`}
+                            onCommit={(next) => updateConfig(idx, field.key, next)}
+                            className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
+                          />
+                        )}
+                        {field.type === "number" && !((ind.name === "lrc" || ind.name === "regression") && isChannelPhase2NumberField(field.key)) && (
                           <input
                             type="number"
                             min={field.min ?? (ind.name === "adx" && field.key === "min_history" ? 200 : undefined)}
@@ -634,6 +688,8 @@ export function IndicatorsFilter({
                                 }
                                 if (isReclaimChannelAction(nextAction)) {
                                   patch.min_consecutive_below = ind.config.min_consecutive_below ?? 1;
+                                  patch.below_candles_min = ind.config.below_candles_min ?? 1;
+                                  patch.below_candles_max = ind.config.below_candles_max ?? 5;
                                   patch.require_still_above_now = ind.config.require_still_above_now ?? true;
                                 }
                                 updateConfigPatch(idx, patch);
@@ -763,6 +819,8 @@ export function IndicatorsFilter({
                                         }
                                         if (isReclaimChannelAction(nextAction)) {
                                           patch.min_consecutive_below = area.min_consecutive_below ?? 1;
+                                          patch.below_candles_min = area.below_candles_min ?? 1;
+                                          patch.below_candles_max = area.below_candles_max ?? 5;
                                           patch.require_still_above_now = area.require_still_above_now ?? true;
                                         }
                                         updateAreaRulePatch(idx, areaIdx, {
@@ -857,30 +915,26 @@ export function IndicatorsFilter({
                                   {phase2RangeActive && (
                                     <>
                                       <div className="space-y-1">
-                                        <div className="text-[10px] text-muted-foreground">Candles Since Min</div>
-                                        <input
-                                          type="number"
-                                          value={(area.candles_since_min as number | null) ?? ""}
-                                          onChange={(e) => updateAreaRule(idx, areaIdx, "candles_since_min", e.target.value === "" ? null : Number(e.target.value))}
-                                          onBlur={(e) => {
-                                            if (!e.target.value) {
-                                              updateAreaRule(idx, areaIdx, "candles_since_min", 0);
-                                            }
-                                          }}
+                                        <div className="text-[10px] text-muted-foreground">
+                                          {reclaimFieldsActive ? "Candles Since Reclaim Min" : "Candles Since Min"}
+                                        </div>
+                                        <ClearableNumberInput
+                                          value={area.candles_since_min as number | null | undefined}
+                                          fallback={0}
+                                          aria-label={`Area Rule ${areaIdx + 1} ${reclaimFieldsActive ? "Candles Since Reclaim Min" : "Candles Since Min"}`}
+                                          onCommit={(next) => updateAreaRule(idx, areaIdx, "candles_since_min", next)}
                                           className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                         />
                                       </div>
                                       <div className="space-y-1">
-                                        <div className="text-[10px] text-muted-foreground">Candles Since Max</div>
-                                        <input
-                                          type="number"
-                                          value={(area.candles_since_max as number | null) ?? ""}
-                                          onChange={(e) => updateAreaRule(idx, areaIdx, "candles_since_max", e.target.value === "" ? null : Number(e.target.value))}
-                                          onBlur={(e) => {
-                                            if (!e.target.value) {
-                                              updateAreaRule(idx, areaIdx, "candles_since_max", 5);
-                                            }
-                                          }}
+                                        <div className="text-[10px] text-muted-foreground">
+                                          {reclaimFieldsActive ? "Candles Since Reclaim Max" : "Candles Since Max"}
+                                        </div>
+                                        <ClearableNumberInput
+                                          value={area.candles_since_max as number | null | undefined}
+                                          fallback={5}
+                                          aria-label={`Area Rule ${areaIdx + 1} ${reclaimFieldsActive ? "Candles Since Reclaim Max" : "Candles Since Max"}`}
+                                          onCommit={(next) => updateAreaRule(idx, areaIdx, "candles_since_max", next)}
                                           className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                         />
                                       </div>
@@ -889,16 +943,33 @@ export function IndicatorsFilter({
                                   {reclaimFieldsActive && (
                                     <>
                                       <div className="space-y-1">
-                                        <div className="text-[10px] text-muted-foreground">Min Consecutive Below</div>
-                                        <input
-                                          type="number"
-                                          value={(area.min_consecutive_below as number | null) ?? ""}
-                                          onChange={(e) => updateAreaRule(idx, areaIdx, "min_consecutive_below", e.target.value === "" ? null : Number(e.target.value))}
-                                          onBlur={(e) => {
-                                            if (!e.target.value) {
-                                              updateAreaRule(idx, areaIdx, "min_consecutive_below", 1);
-                                            }
-                                          }}
+                                        <div className="text-[10px] text-muted-foreground">Minimum Consecutive Below</div>
+                                        <ClearableNumberInput
+                                          value={area.min_consecutive_below as number | null | undefined}
+                                          fallback={1}
+                                          min={1}
+                                          aria-label={`Area Rule ${areaIdx + 1} Minimum Consecutive Below`}
+                                          onCommit={(next) => updateAreaRule(idx, areaIdx, "min_consecutive_below", next)}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Below Candles Min</div>
+                                        <ClearableNumberInput
+                                          value={area.below_candles_min as number | null | undefined}
+                                          fallback={1}
+                                          aria-label={`Area Rule ${areaIdx + 1} Below Candles Min`}
+                                          onCommit={(next) => updateAreaRule(idx, areaIdx, "below_candles_min", next)}
+                                          className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <div className="text-[10px] text-muted-foreground">Below Candles Max</div>
+                                        <ClearableNumberInput
+                                          value={area.below_candles_max as number | null | undefined}
+                                          fallback={5}
+                                          aria-label={`Area Rule ${areaIdx + 1} Below Candles Max`}
+                                          onCommit={(next) => updateAreaRule(idx, areaIdx, "below_candles_max", next)}
                                           className="w-full bg-secondary border border-border rounded px-2 py-1 text-[16px] sm:text-xs text-foreground"
                                         />
                                       </div>
