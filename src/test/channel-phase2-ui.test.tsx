@@ -190,6 +190,10 @@ describe("Phase 2 channel UI", () => {
             selection_mode: "all",
             candles_since_min: 0,
             candles_since_max: 5,
+            below_candles_min: 1,
+            below_candles_max: 5,
+            min_consecutive_below: 1,
+            require_still_above_now: true,
             window: 1,
           }),
         ]}
@@ -199,6 +203,74 @@ describe("Phase 2 channel UI", () => {
     expect(screen.getByLabelText("Linear Regression Channel Candles Since Event Min")).toBeInTheDocument();
     expect(screen.getByLabelText("Linear Regression Channel Candles Since Event Max")).toBeInTheDocument();
     expect(screen.queryByText("Below Candles Min")).not.toBeInTheDocument();
+  });
+
+  it("does not send reclaim-only fields for non-reclaim LRC Phase 2 actions", async () => {
+    const { result } = renderHook(() => useScreener());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      result.current.setIndicators([
+        channelIndicator("lrc", {
+          lines: ["lower"],
+          action: "rejected_from_below_bearish",
+          selection_mode: "all",
+          candles_since_min: 0,
+          candles_since_max: 5,
+          below_candles_min: 1,
+          below_candles_max: 5,
+          min_consecutive_below: 1,
+          require_still_above_now: true,
+          window: 1,
+        }),
+      ]);
+    });
+
+    const config = result.current.buildRequest().indicators[0].config;
+    expect(config).toMatchObject({
+      action: "rejected_from_below_bearish",
+      candles_since_min: 0,
+      candles_since_max: 5,
+      window: 1,
+    });
+    expect(config).not.toHaveProperty("below_candles_min");
+    expect(config).not.toHaveProperty("below_candles_max");
+    expect(config).not.toHaveProperty("min_consecutive_below");
+    expect(config).not.toHaveProperty("require_still_above_now");
+  });
+
+  it("does not send reclaim-only fields for non-reclaim Trend Channel area actions", async () => {
+    const { result } = renderHook(() => useScreener());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      result.current.setIndicators([
+        trendIndicator({
+          area: "bottom_line",
+          action: "piercing_from_below",
+          candles_since_min: 0,
+          candles_since_max: 5,
+          below_candles_min: 1,
+          below_candles_max: 5,
+          min_consecutive_below: 1,
+          require_still_above_now: true,
+          window: 1,
+        }),
+      ]);
+    });
+
+    const area = (result.current.buildRequest().indicators[0].config.areas as Record<string, unknown>[])[0];
+    expect(area).toMatchObject({
+      area: "bottom_line",
+      action: "piercing_from_below",
+      candles_since_min: 0,
+      candles_since_max: 5,
+      window: 1,
+    });
+    expect(area).not.toHaveProperty("below_candles_min");
+    expect(area).not.toHaveProperty("below_candles_max");
+    expect(area).not.toHaveProperty("min_consecutive_below");
+    expect(area).not.toHaveProperty("require_still_above_now");
   });
 
   it("old channel actions still show and send window", async () => {

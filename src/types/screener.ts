@@ -2249,10 +2249,38 @@ function normalizeChannelSelectionMode(value: unknown): ChannelSelectionMode {
     : "all";
 }
 
+const CHANNEL_PHASE2_RANGE_FIELDS = [
+  "candles_since_min",
+  "candles_since_max",
+] as const;
+
+const CHANNEL_RECLAIM_ONLY_FIELDS = [
+  "min_consecutive_below",
+  "below_candles_min",
+  "below_candles_max",
+  "require_still_above_now",
+] as const;
+
+function stripChannelPhase2RangeFields(config: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...config };
+  CHANNEL_PHASE2_RANGE_FIELDS.forEach((field) => {
+    delete next[field];
+  });
+  return next;
+}
+
+function stripChannelReclaimOnlyFields(config: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...config };
+  CHANNEL_RECLAIM_ONLY_FIELDS.forEach((field) => {
+    delete next[field];
+  });
+  return next;
+}
+
 function normalizePhase2ChannelFields(config: Record<string, unknown>): Record<string, unknown> {
   const action = String(config.action ?? "").trim().toLowerCase();
   if (!isPhase2ChannelAction(action)) {
-    return config;
+    return stripChannelReclaimOnlyFields(stripChannelPhase2RangeFields(config));
   }
 
   // Only fill a default when the field has never been set (undefined) - once
@@ -2273,6 +2301,8 @@ function normalizePhase2ChannelFields(config: Record<string, unknown>): Record<s
     if (!("below_candles_min" in config)) next.below_candles_min = 1;
     if (!("below_candles_max" in config)) next.below_candles_max = 5;
     if (!("require_still_above_now" in config)) next.require_still_above_now = true;
+  } else {
+    return stripChannelReclaimOnlyFields(next);
   }
 
   return next;
@@ -2286,7 +2316,7 @@ function normalizePhase2ChannelFields(config: Record<string, unknown>): Record<s
 export function resolvePhase2ChannelFieldsForRequest(config: Record<string, unknown>): Record<string, unknown> {
   const action = String(config.action ?? "").trim().toLowerCase();
   if (!isPhase2ChannelAction(action)) {
-    return config;
+    return stripChannelReclaimOnlyFields(stripChannelPhase2RangeFields(config));
   }
 
   const next: Record<string, unknown> = {
@@ -2301,6 +2331,8 @@ export function resolvePhase2ChannelFieldsForRequest(config: Record<string, unkn
     next.below_candles_min = config.below_candles_min ?? 1;
     next.below_candles_max = config.below_candles_max ?? 5;
     next.require_still_above_now = config.require_still_above_now ?? true;
+  } else {
+    return stripChannelReclaimOnlyFields(next);
   }
 
   return next;

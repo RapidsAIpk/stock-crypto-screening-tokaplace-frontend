@@ -242,6 +242,13 @@ const CHANNEL_PHASE2_NUMBER_DEFAULTS: Record<string, number> = {
   min_consecutive_below: 1,
 };
 
+const CHANNEL_RECLAIM_ONLY_FIELD_KEYS = [
+  "min_consecutive_below",
+  "below_candles_min",
+  "below_candles_max",
+  "require_still_above_now",
+] as const;
+
 function isChannelPhase2NumberField(fieldKey: string): boolean {
   return Object.prototype.hasOwnProperty.call(CHANNEL_PHASE2_NUMBER_DEFAULTS, fieldKey);
 }
@@ -681,16 +688,21 @@ export function IndicatorsFilter({
                               if ((ind.name === "lrc" || ind.name === "regression") && field.key === "action") {
                                 const nextAction = e.target.value || "touch";
                                 const patch: Record<string, unknown> = { action: nextAction };
+                                const isReclaimAction = isReclaimChannelAction(nextAction);
                                 if (isPhase2ChannelAction(nextAction)) {
                                   patch.candles_since_min = ind.config.candles_since_min ?? 0;
                                   patch.candles_since_max = ind.config.candles_since_max ?? 5;
                                   patch.window = ind.config.window ?? 1;
                                 }
-                                if (isReclaimChannelAction(nextAction)) {
+                                if (isReclaimAction) {
                                   patch.min_consecutive_below = ind.config.min_consecutive_below ?? 1;
                                   patch.below_candles_min = ind.config.below_candles_min ?? 1;
                                   patch.below_candles_max = ind.config.below_candles_max ?? 5;
                                   patch.require_still_above_now = ind.config.require_still_above_now ?? true;
+                                } else {
+                                  CHANNEL_RECLAIM_ONLY_FIELD_KEYS.forEach((key) => {
+                                    patch[key] = undefined;
+                                  });
                                 }
                                 updateConfigPatch(idx, patch);
                                 return;
@@ -806,7 +818,8 @@ export function IndicatorsFilter({
                                           updateAreaRulePatch(idx, areaIdx, { action: TREND_CHANNEL_DISABLED });
                                           return;
                                         }
-                                        const patch: Partial<AreaRule> = {
+                                        const isReclaimAction = isReclaimChannelAction(nextAction);
+                                        const patch: Record<string, unknown> = {
                                           action: nextAction,
                                           area: area.area === TREND_CHANNEL_DISABLED
                                             ? "top_line"
@@ -817,11 +830,15 @@ export function IndicatorsFilter({
                                           patch.candles_since_max = area.candles_since_max ?? 5;
                                           patch.window = area.window ?? 1;
                                         }
-                                        if (isReclaimChannelAction(nextAction)) {
+                                        if (isReclaimAction) {
                                           patch.min_consecutive_below = area.min_consecutive_below ?? 1;
                                           patch.below_candles_min = area.below_candles_min ?? 1;
                                           patch.below_candles_max = area.below_candles_max ?? 5;
                                           patch.require_still_above_now = area.require_still_above_now ?? true;
+                                        } else {
+                                          CHANNEL_RECLAIM_ONLY_FIELD_KEYS.forEach((key) => {
+                                            patch[key] = undefined;
+                                          });
                                         }
                                         updateAreaRulePatch(idx, areaIdx, {
                                           ...patch,
