@@ -11,6 +11,7 @@ import {
   getDefaultIndicatorConfig,
   INDICATOR_DEFINITIONS,
   normalizeIndicatorConfig,
+  resolvePhase2ChannelFieldsForRequest,
   resolveChannelRespectChannelLength,
 } from "@/types/screener";
 
@@ -159,6 +160,51 @@ describe("indicator defaults", () => {
           window: 1,
         },
       ],
+    });
+  });
+
+  it("strips reclaim-only fields from non-reclaim Phase 2 channel actions", () => {
+    const normalized = normalizeIndicatorConfig({
+      name: "lrc",
+      timeframe: "single",
+      config: {
+        lines: ["lower"],
+        action: "rejected_from_below_bearish",
+        candles_since_min: 0,
+        candles_since_max: 5,
+        below_candles_min: 1,
+        below_candles_max: 5,
+        min_consecutive_below: 1,
+        require_still_above_now: true,
+      },
+    });
+
+    expect(normalized.config).toMatchObject({
+      action: "rejected_from_below_bearish",
+      candles_since_min: 0,
+      candles_since_max: 5,
+    });
+    expect(normalized.config).not.toHaveProperty("below_candles_min");
+    expect(normalized.config).not.toHaveProperty("below_candles_max");
+    expect(normalized.config).not.toHaveProperty("min_consecutive_below");
+    expect(normalized.config).not.toHaveProperty("require_still_above_now");
+  });
+
+  it("strips stale Phase 2 fields from old channel actions before building requests", () => {
+    const resolved = resolvePhase2ChannelFieldsForRequest({
+      action: "stay_below",
+      window: 1,
+      candles_since_min: 0,
+      candles_since_max: 5,
+      below_candles_min: 1,
+      below_candles_max: 5,
+      min_consecutive_below: 1,
+      require_still_above_now: true,
+    });
+
+    expect(resolved).toEqual({
+      action: "stay_below",
+      window: 1,
     });
   });
 

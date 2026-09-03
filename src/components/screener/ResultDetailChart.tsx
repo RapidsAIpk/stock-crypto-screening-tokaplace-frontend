@@ -1381,7 +1381,13 @@ export function ResultDetailChart({
               {summary.candlesSince !== null ? ` · ${summary.candlesSince} candles ago` : ""}
               {summary.action === "reclaimed_from_below_bullish"
                 ? ` · ${summary.closedBelowCount} close${summary.closedBelowCount === 1 ? "" : "s"} below first`
-                : " · never closed below the line"}
+                : summary.action === "piercing_from_below"
+                  ? " · opened below, traded through, closed above"
+                  : summary.action === "rejected_from_above_bullish"
+                    ? " · came from above and closed back above"
+                    : summary.action === "rejected_from_below_bearish"
+                      ? " · came from below and closed back below"
+                      : ""}
             </span>
           ))}
           <span className="rounded border border-[#2a2e39] bg-[#151922] px-2 py-1 text-[#9ca3af]">

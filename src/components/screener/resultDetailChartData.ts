@@ -473,7 +473,9 @@ function interactionEntries(
   indicatorDetails: Array<{ name: string; passed: boolean; evidence?: unknown }> = [],
   mode?: string,
 ): Array<Record<string, unknown>> {
-  const indicatorName = mode === "lrc" ? "lrc" : mode === "regression" ? "regression" : null;
+  const indicatorName = mode === "lrc" || mode === "regression" || mode === "trend"
+    ? mode
+    : null;
   if (!indicatorName) return [];
 
   const detail = indicatorDetails.find((item) => item.name === indicatorName && item.passed);

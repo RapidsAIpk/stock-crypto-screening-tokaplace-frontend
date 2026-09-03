@@ -255,9 +255,150 @@ function LinRegEvidenceCard({ evidence }: { evidence: Record<string, unknown> })
   );
 }
 
+const CHANNEL_INDICATORS = new Set(["lrc", "regression", "trend"]);
+
+function phase2FailureMessage(reason: unknown): string | null {
+  if (reason === "below_candles_out_of_range") {
+    return "Rejected because the latest reclaim was below the line for more candles than allowed.";
+  }
+  if (!reason) return null;
+  return humanizeToken(reason);
+}
+
+function phase2ActionHelp(action: unknown): string | null {
+  if (action === "piercing_from_below") {
+    return "Piercing From Below requires the candle to open below the line, trade through the line, and close above it.";
+  }
+  if (action === "reclaimed_from_below_bullish") {
+    return "Reclaimed From Below validates the latest raw reclaim first, then checks the configured candle ranges.";
+  }
+  if (action === "rejected_from_above_bullish") {
+    return "Rejected From Above requires price to approach from above, touch or pierce the line, and close back above it.";
+  }
+  if (action === "rejected_from_below_bearish") {
+    return "Rejected From Below requires price to approach from below, touch or pierce the line, and close back below it.";
+  }
+  return null;
+}
+
+function readChannelInteractions(evidence: Record<string, unknown>): Array<Record<string, unknown>> {
+  const entries = evidence.channel_interactions;
+  if (Array.isArray(entries)) return entries as Array<Record<string, unknown>>;
+  return [evidence];
+}
+
+function hasPhase2ChannelEvidence(evidence: Record<string, unknown>): boolean {
+  return readChannelInteractions(evidence).some((entry) => (
+    entry.action
+    || entry.failure_reason
+    || entry.below_candles != null
+    || entry.candles_since != null
+  ));
+}
+
+function channelConfigForInteraction(item: IndicatorDetail, entry: Record<string, unknown>): Record<string, unknown> {
+  const config = item.config as Record<string, unknown>;
+  const areas = Array.isArray(config.areas) ? config.areas as Array<Record<string, unknown>> : [];
+  if (areas.length === 0) return config;
+
+  const areaName = String(entry.area ?? entry.line ?? "").trim().toLowerCase();
+  const action = String(entry.action ?? "").trim().toLowerCase();
+  return areas.find((area) => {
+    const sameArea = String(area.area ?? "").trim().toLowerCase() === areaName;
+    const sameAction = !action || String(area.action ?? "").trim().toLowerCase() === action;
+    return sameArea && sameAction;
+  }) ?? config;
+}
+
+function ChannelEvidenceCard({ item, evidence, showTechnical }: {
+  item: IndicatorDetail;
+  evidence: Record<string, unknown>;
+  showTechnical: boolean;
+}) {
+  const interactions = readChannelInteractions(evidence);
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-foreground">{humanizeToken(item.name)}</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            Phase 2 channel interaction details from the backend.
+          </div>
+        </div>
+        <DetailStatusBadge passed={item.passed} />
+      </div>
+
+      <div className="grid gap-3">
+        {interactions.map((entry, index) => {
+          const action = entry.action;
+          const config = channelConfigForInteraction(item, entry);
+          const failureMessage = phase2FailureMessage(entry.failure_reason);
+          const actionHelp = phase2ActionHelp(action);
+
+          return (
+            <div key={`${String(action || "channel")}-${index}`} className="space-y-3 rounded-xl border border-border/50 bg-background/35 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-foreground">
+                  {humanizeToken(action || "Channel interaction")}
+                  {entry.line ? ` - ${humanizeToken(entry.line)}` : ""}
+                  {entry.area ? ` - ${humanizeToken(entry.area)}` : ""}
+                </div>
+                {"matched" in entry ? (
+                  <DetailStatusBadge passed={Boolean(entry.matched)} />
+                ) : null}
+              </div>
+
+              {actionHelp ? (
+                <div className="rounded-lg border border-border/40 bg-background/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  {actionHelp}
+                </div>
+              ) : null}
+
+              {failureMessage ? (
+                <div className="rounded-lg border border-rose-400/25 bg-rose-400/10 px-3 py-2 text-xs leading-5 text-rose-100">
+                  {failureMessage}
+                </div>
+              ) : null}
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {entry.candles_since != null ? (
+                  <MetaCard
+                    label={action === "reclaimed_from_below_bullish" ? "Candles since reclaim" : "Candles since event"}
+                    value={formatNumber(Number(entry.candles_since))}
+                  />
+                ) : null}
+                {entry.below_candles != null ? (
+                  <MetaCard label="Below candles count" value={formatNumber(Number(entry.below_candles))} />
+                ) : null}
+                {action === "reclaimed_from_below_bullish" ? (
+                  <>
+                    <MetaCard
+                      label="Configured Below Candles Min"
+                      value={formatNumber(Number(config.below_candles_min ?? entry.below_candles_min ?? 1))}
+                    />
+                    <MetaCard
+                      label="Configured Below Candles Max"
+                      value={formatNumber(Number(config.below_candles_max ?? entry.below_candles_max ?? 5))}
+                    />
+                  </>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {showTechnical ? <JsonBlock title="Indicator Config" value={item.config} /> : null}
+      {showTechnical ? <JsonBlock title="Evidence" value={evidence} /> : null}
+    </div>
+  );
+}
+
 function FriendlyIndicatorCard({ item, showTechnical }: { item: IndicatorDetail; showTechnical: boolean }) {
   const evidence = item.evidence && !Array.isArray(item.evidence) ? item.evidence : null;
   const isLinReg = item.name === "linreg_candles" && evidence;
+  const isChannel = CHANNEL_INDICATORS.has(item.name) && evidence;
 
   if (isLinReg) {
     return (
@@ -266,6 +407,16 @@ function FriendlyIndicatorCard({ item, showTechnical }: { item: IndicatorDetail;
         {showTechnical ? <JsonBlock title="Raw indicator config" value={item.config} /> : null}
         {showTechnical ? <JsonBlock title="Raw evidence JSON" value={evidence} /> : null}
       </div>
+    );
+  }
+
+  if (isChannel && hasPhase2ChannelEvidence(evidence)) {
+    return (
+      <ChannelEvidenceCard
+        item={item}
+        evidence={evidence}
+        showTechnical={showTechnical}
+      />
     );
   }
 

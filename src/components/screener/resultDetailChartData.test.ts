@@ -9,6 +9,8 @@ import {
   normalizeMarketCandles,
   normalizeRegressionChannel,
   normalizeTrendChannel,
+  resolveChannelInteractionCandleReasons,
+  resolveChannelInteractionSummaries,
   regressionValueAt,
   resolveChannelRespectHighlightTimes,
   resolveChartChannelVisibility,
@@ -43,6 +45,90 @@ describe("resolveChartChannelVisibility", () => {
         channels: ["trend", "regression"],
       },
     })).toEqual({ lrc: false, regression: true, trend: true });
+  });
+});
+
+describe("resolveChannelInteractionSummaries", () => {
+  it("keeps piercing and rejection summaries action specific", () => {
+    const summaries = resolveChannelInteractionSummaries([
+      {
+        name: "lrc",
+        passed: true,
+        evidence: {
+          channel_interactions: [
+            {
+              line: "lower",
+              action: "piercing_from_below",
+              matched: true,
+              candles_since: 3,
+              stages: [{ stage: "pierced_close_above" }],
+            },
+            {
+              line: "lower",
+              action: "rejected_from_below_bearish",
+              matched: true,
+              candles_since: 1,
+              stages: [{ stage: "came_from_below" }, { stage: "rejected_close_below" }],
+            },
+          ],
+        },
+      },
+    ], "lrc");
+
+    expect(summaries.map((summary) => summary.action)).toEqual([
+      "piercing_from_below",
+      "rejected_from_below_bearish",
+    ]);
+    expect(summaries[0].actionLabel).toBe("Piercing From Below");
+    expect(summaries[1].actionLabel).toBe("Rejected From Below");
+    expect(summaries[0].closedBelowCount).toBe(0);
+  });
+
+  it("reads Trend Channel interaction evidence for chart summaries and markers", () => {
+    const details = [
+      {
+        name: "trend",
+        passed: true,
+        evidence: {
+          channel_interactions: [
+            {
+              area: "bottom_line",
+              line: "bottom_line",
+              action: "rejected_from_above_bullish",
+              matched: true,
+              candles_since: 2,
+              stages: [
+                {
+                  stage: "came_from_above",
+                  candle_time: 1_000,
+                  line_value: 48.54,
+                  close: 48.9,
+                },
+                {
+                  stage: "rejected_close_above",
+                  candle_time: 2_000,
+                  line_value: 48.58,
+                  close: 49.13,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+
+    const summaries = resolveChannelInteractionSummaries(details, "trend");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      action: "rejected_from_above_bullish",
+      actionLabel: "Rejected From Above",
+      line: "bottom_line",
+      candlesSince: 2,
+    });
+
+    const reasons = resolveChannelInteractionCandleReasons(details, "trend");
+    expect(reasons.get(1_000)?.[0].label).toContain("Approached From Above");
+    expect(reasons.get(2_000)?.[0].label).toContain("Closed Back Above");
   });
 });
 
