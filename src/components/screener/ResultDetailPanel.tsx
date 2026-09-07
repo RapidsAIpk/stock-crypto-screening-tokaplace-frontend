@@ -1,5 +1,11 @@
 import { X } from "lucide-react";
-import type { FilterDetail, IndicatorDetail, ScreenerResult, ScreenerResultDetail } from "@/types/screener";
+import {
+  trendyAdxConditionsForMode,
+  type FilterDetail,
+  type IndicatorDetail,
+  type ScreenerResult,
+  type ScreenerResultDetail,
+} from "@/types/screener";
 import { getIndicatorColor } from "./indicatorColors";
 import { CopyResultDetailButton } from "./dev/CopyResultDetailButton";
 import { appEnv } from "@/config/env";
@@ -395,10 +401,158 @@ function ChannelEvidenceCard({ item, evidence, showTechnical }: {
   );
 }
 
+function readAdxConditionEvidence(evidence: Record<string, unknown>): Array<Record<string, unknown>> {
+  const candidates = [
+    evidence.conditions,
+    evidence.condition_results,
+    evidence.condition_checks,
+    evidence.checks,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate as Array<Record<string, unknown>>;
+    if (candidate && typeof candidate === "object") {
+      return Object.entries(candidate as Record<string, unknown>).flatMap(([id, value]) => (
+        value && typeof value === "object"
+          ? [{ id, ...(value as Record<string, unknown>) }]
+          : [{ id, passed: Boolean(value) }]
+      ));
+    }
+  }
+
+  const ruleChecks = evidence.rule_checks;
+  if (ruleChecks && typeof ruleChecks === "object") {
+    return Object.entries(ruleChecks as Record<string, unknown>).flatMap(([id, value]) => (
+      value && typeof value === "object"
+        ? [{ id, ...(value as Record<string, unknown>) }]
+        : [{ id, passed: Boolean(value) }]
+    ));
+  }
+
+  return [];
+}
+
+function conditionPassed(value: Record<string, unknown>): boolean | null {
+  if ("passed" in value) return Boolean(value.passed);
+  if ("matched" in value) return Boolean(value.matched);
+  if ("satisfied" in value) return Boolean(value.satisfied);
+  return null;
+}
+
+function adxConditionLabel(id: string, mode: string): string {
+  return trendyAdxConditionsForMode(mode).find((condition) => condition.id === id)?.label
+    ?? humanizeToken(id);
+}
+
+function AdxEvidenceCard({ item, evidence, showTechnical }: {
+  item: IndicatorDetail;
+  evidence: Record<string, unknown>;
+  showTechnical: boolean;
+}) {
+  const config = item.config as Record<string, unknown>;
+  const mode = String(config.mode ?? "");
+  const configuredConditions = Array.isArray(config.conditions)
+    ? config.conditions as Array<Record<string, unknown>>
+    : [];
+  const evidenceById = new Map(
+    readAdxConditionEvidence(evidence)
+      .map((entry) => [String(entry.id ?? entry.condition ?? ""), entry] as const)
+      .filter(([id]) => id),
+  );
+  const rows = configuredConditions.length
+    ? configuredConditions.map((condition) => ({
+      config: condition,
+      evidence: evidenceById.get(String(condition.id ?? "")) ?? {},
+    }))
+    : [...evidenceById.entries()].map(([id, conditionEvidence]) => ({
+      config: { id },
+      evidence: conditionEvidence,
+    }));
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/5 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-foreground">Trendy ADX</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            Dynamic backend condition results for the selected ADX setup.
+          </div>
+        </div>
+        <DetailStatusBadge passed={item.passed} />
+      </div>
+
+      <div className="grid gap-3">
+        {rows.map(({ config: conditionConfig, evidence: conditionEvidence }, index) => {
+          const id = String(conditionConfig.id ?? conditionEvidence.id ?? "");
+          const passed = conditionPassed(conditionEvidence);
+          const failureReason = conditionEvidence.failure_reason ?? conditionEvidence.reason;
+          const eventMin = conditionConfig.candles_since_min ?? conditionEvidence.candles_since_min;
+          const eventMax = conditionConfig.candles_since_max ?? conditionEvidence.candles_since_max;
+          const directionMin = conditionConfig.candles_since_direction_change_min
+            ?? conditionEvidence.candles_since_direction_change_min;
+          const directionMax = conditionConfig.candles_since_direction_change_max
+            ?? conditionEvidence.candles_since_direction_change_max;
+          const activeMin = conditionConfig.active_candles_min ?? conditionEvidence.active_candles_min;
+          const activeMax = conditionConfig.active_candles_max ?? conditionEvidence.active_candles_max;
+
+          return (
+            <div key={`${id}-${index}`} className="space-y-3 rounded-xl border border-border/50 bg-background/35 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-foreground">{adxConditionLabel(id, mode)}</div>
+                {passed !== null ? <DetailStatusBadge passed={passed} /> : null}
+              </div>
+
+              {failureReason ? (
+                <div className="rounded-lg border border-rose-400/25 bg-rose-400/10 px-3 py-2 text-xs leading-5 text-rose-100">
+                  {humanizeToken(failureReason)}
+                </div>
+              ) : null}
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {conditionConfig.direction || conditionEvidence.direction ? (
+                  <MetaCard label="Direction" value={humanizeToken(conditionConfig.direction ?? conditionEvidence.direction)} />
+                ) : null}
+                {conditionEvidence.candles_since_direction_change != null ? (
+                  <MetaCard label="Candles since direction change" value={formatNumber(Number(conditionEvidence.candles_since_direction_change))} />
+                ) : null}
+                {directionMin != null || directionMax != null ? (
+                  <MetaCard label="Direction change range" value={`${formatNumber(Number(directionMin ?? 0))} to ${formatNumber(Number(directionMax ?? 5))}`} />
+                ) : null}
+                {conditionEvidence.candles_since != null ? (
+                  <MetaCard label="Candles since event" value={formatNumber(Number(conditionEvidence.candles_since))} />
+                ) : null}
+                {eventMin != null || eventMax != null ? (
+                  <MetaCard label="Event candle range" value={`${formatNumber(Number(eventMin ?? 0))} to ${formatNumber(Number(eventMax ?? 5))}`} />
+                ) : null}
+                {conditionEvidence.active_candles != null ? (
+                  <MetaCard label="Active candles" value={formatNumber(Number(conditionEvidence.active_candles))} />
+                ) : null}
+                {activeMin != null || activeMax != null ? (
+                  <MetaCard label="Active candle range" value={`${formatNumber(Number(activeMin ?? 1))} to ${formatNumber(Number(activeMax ?? 5))}`} />
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {showTechnical ? <JsonBlock title="Indicator Config" value={item.config} /> : null}
+      {showTechnical ? <JsonBlock title="Evidence" value={evidence} /> : null}
+    </div>
+  );
+}
+
 function FriendlyIndicatorCard({ item, showTechnical }: { item: IndicatorDetail; showTechnical: boolean }) {
   const evidence = item.evidence && !Array.isArray(item.evidence) ? item.evidence : null;
   const isLinReg = item.name === "linreg_candles" && evidence;
   const isChannel = CHANNEL_INDICATORS.has(item.name) && evidence;
+  const adxConditions = Array.isArray((item.config as Record<string, unknown>).conditions)
+    ? (item.config as Record<string, unknown>).conditions as Array<Record<string, unknown>>
+    : [];
 
   if (isLinReg) {
     return (
@@ -415,6 +569,16 @@ function FriendlyIndicatorCard({ item, showTechnical }: { item: IndicatorDetail;
       <ChannelEvidenceCard
         item={item}
         evidence={evidence}
+        showTechnical={showTechnical}
+      />
+    );
+  }
+
+  if (item.name === "adx" && (adxConditions.length || (evidence && readAdxConditionEvidence(evidence).length))) {
+    return (
+      <AdxEvidenceCard
+        item={item}
+        evidence={evidence ?? {}}
         showTechnical={showTechnical}
       />
     );
