@@ -180,3 +180,87 @@ describe("ResultDetailPanel Phase 2 channel evidence", () => {
     expect(screen.getByText("Trend channel touched the selected area.")).toBeInTheDocument();
   });
 });
+
+describe("ResultDetailPanel Trendy ADX evidence", () => {
+  it("renders dynamic backend condition results instead of generic ADX text", () => {
+    render(
+      <ResultDetailPanel
+        result={baseResult}
+        detail={buildDetail({
+          name: "adx",
+          passed: false,
+          config: {
+            mode: "bullish",
+            conditions: [
+              {
+                id: "adx_direction",
+                direction: "any",
+                candles_since_direction_change_min: 0,
+                candles_since_direction_change_max: 5,
+              },
+              {
+                id: "di_crossed_above",
+                candles_since_min: 0,
+                candles_since_max: 5,
+              },
+            ],
+          },
+          evidence: {
+            condition_results: [
+              {
+                id: "adx_direction",
+                passed: true,
+                direction: "down",
+                candles_since_direction_change: 2,
+              },
+              {
+                id: "di_crossed_above",
+                passed: false,
+                failure_reason: "no_recent_cross",
+                candles_since: 9,
+              },
+            ],
+          },
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Dynamic backend condition results for the selected ADX setup.")).toBeInTheDocument();
+    expect(screen.getByText("ADX Direction")).toBeInTheDocument();
+    expect(screen.getByText("DI cross: dominant line just crossed above opposing")).toBeInTheDocument();
+    expect(screen.getByText("Candles since direction change")).toBeInTheDocument();
+    expect(screen.getByText("Direction change range")).toBeInTheDocument();
+    expect(screen.getByText("Candles since event")).toBeInTheDocument();
+    expect(screen.getByText("Event candle range")).toBeInTheDocument();
+    expect(screen.getByText("No Recent Cross")).toBeInTheDocument();
+    expect(screen.queryByText("This filter did not pass.")).not.toBeInTheDocument();
+  });
+
+  it("renders configured Trendy ADX conditions even when backend sends partial evidence", () => {
+    render(
+      <ResultDetailPanel
+        result={baseResult}
+        detail={buildDetail({
+          name: "adx",
+          passed: false,
+          config: {
+            mode: "bullish",
+            conditions: [
+              {
+                id: "di_crossed_above",
+                candles_since_min: 0,
+                candles_since_max: 5,
+              },
+            ],
+          },
+          evidence: null,
+        })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("DI cross: dominant line just crossed above opposing")).toBeInTheDocument();
+    expect(screen.getByText("Event candle range")).toBeInTheDocument();
+  });
+});
